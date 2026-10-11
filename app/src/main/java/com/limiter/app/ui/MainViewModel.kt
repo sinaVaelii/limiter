@@ -28,6 +28,7 @@ import kotlinx.coroutines.launch
 import com.limiter.app.data.SystemStatus
 import com.limiter.app.data.SystemStatusChecker
 import com.limiter.app.policy.SelfLockPolicy
+import com.limiter.app.scheduler.TimeWindowScheduler
 
 data class BatchResult(
     val succeededPackages: List<String> = emptyList(),
@@ -80,7 +81,8 @@ class MainViewModel(
     val lockCoordinator: LockCoordinator?,
     private val appDiscoveryRepository: AppDiscoveryRepository? = null,
     private val criticalPackageResolver: CriticalPackageResolver? = null,
-    private val systemStatusChecker: SystemStatusChecker? = null
+    private val systemStatusChecker: SystemStatusChecker? = null,
+    private val timeWindowScheduler: TimeWindowScheduler? = null
 ) : ViewModel() {
 
     private val _availableApps = MutableStateFlow<List<DiscoveredApp>>(emptyList())
@@ -275,6 +277,7 @@ class MainViewModel(
 
             if (succeeded.isNotEmpty() || deferred.isNotEmpty()) {
                 coordinator.reconcile()
+                timeWindowScheduler?.reschedule()
                 loadAvailableApps()
             }
 
@@ -304,6 +307,7 @@ class MainViewModel(
             val coordinator = lockCoordinator ?: return@launch
             val result = coordinator.tryEditConfig(config)
             coordinator.reconcile()
+            timeWindowScheduler?.reschedule()
             when (result) {
                 is SettingsPolicy.EditResult.Applied -> _feedbackMessage.value = "Updated ${config.packageName}"
                 is SettingsPolicy.EditResult.Deferred -> _feedbackMessage.value = "Changes to ${config.packageName} deferred to tomorrow"
@@ -327,6 +331,7 @@ class MainViewModel(
             val coordinator = lockCoordinator ?: return@launch
             val result = coordinator.tryRemoveConfig(packageName)
             coordinator.reconcile()
+            timeWindowScheduler?.reschedule()
             loadAvailableApps()
             when (result) {
                 is SettingsPolicy.RemoveResult.Deferred -> {
@@ -351,7 +356,8 @@ class MainViewModel(
                 app.lockCoordinator,
                 app.appDiscoveryRepository,
                 app.criticalPackageResolver,
-                app.systemStatusChecker
+                app.systemStatusChecker,
+                app.timeWindowScheduler
             ) as T
         }
     }

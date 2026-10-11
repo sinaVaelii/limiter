@@ -532,6 +532,7 @@ class LockCoordinator(
         when (editResult) {
             is com.limiter.app.policy.SettingsPolicy.EditResult.Applied -> {
                 settingsRepository.putTarget(editResult.config)
+                settingsRepository.removePending(config.packageName)
             }
             is com.limiter.app.policy.SettingsPolicy.EditResult.Deferred -> {
                 settingsRepository.putPending(editResult.pending)

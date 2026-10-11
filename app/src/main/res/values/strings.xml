@@ -59,4 +59,13 @@
     <string name="locked_readonly_msg">This application is currently locked. Configuration cannot be altered while locked.</string>
     <string name="back">Back</string>
     <string name="add_apps">Add Applications</string>
+
+    <!-- Pending & Edit Status -->
+    <string name="pending_removal">Pending: Removal (applies tomorrow)</string>
+    <string name="pending_change_summary">Pending update: Limit %1$dm, Window %2$s–%3$s</string>
+    <string name="pending_applies_epoch_day">Applies on or after epoch day: %1$d</string>
+    <string name="edit_current_effective">Currently effective: Limit %1$dm, Window %2$s–%3$s</string>
+    <string name="edit_pending_update">Pending update: Limit %1$dm, Window %2$s–%3$s (applies tomorrow)</string>
+    <string name="error_daily_limit_range">Daily limit must be between 1 and 1440 minutes</string>
+    <string name="error_identical_times">Hide time and reveal time cannot be identical</string>
 </resources>

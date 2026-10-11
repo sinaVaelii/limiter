@@ -198,7 +198,7 @@ fun LimiterScreen(viewModel: MainViewModel) {
                                     // Branch to LockedReadOnly per §52
                                     lockedReadOnlyTarget = pkg to lockState
                                 } else {
-                                    editingTarget = config ?: TargetAppConfig(pkg, 60, 1380, 420)
+                                    editingTarget = pending?.desired ?: config ?: TargetAppConfig(pkg, 60, 1380, 420)
                                 }
                             },
                             onLockedClick = {
@@ -254,8 +254,14 @@ fun LimiterScreen(viewModel: MainViewModel) {
 
     // 3. Edit Existing Target Dialog
     if (editingTarget != null) {
+        val editingPkg = editingTarget!!.packageName
+        val effectiveConfig = state.targets[editingPkg]
+        val pendingChange = state.pendingChanges.find { it.packageName == editingPkg }
+
         EditTargetDialog(
             target = editingTarget!!,
+            effectiveConfig = effectiveConfig,
+            pendingChange = pendingChange,
             onDismiss = { editingTarget = null },
             onSave = { updatedConfig ->
                 viewModel.submitConfig(updatedConfig)
@@ -610,15 +616,25 @@ fun AppStatusCard(
             if (pendingChange != null) {
                 Spacer(modifier = Modifier.height(8.dp))
                 if (pendingChange.desired == null) {
-                    Text(text = "Pending: Removal", color = MaterialTheme.colorScheme.secondary)
+                    Text(
+                        text = stringResource(R.string.pending_removal),
+                        color = MaterialTheme.colorScheme.secondary,
+                        fontWeight = FontWeight.Medium
+                    )
                 } else {
                     Text(
-                        text = "Pending Change: Limit ${pendingChange.desired.dailyLimitMinutes}m, Window ${formatTime(pendingChange.desired.hideAtMinuteOfDay)}-${formatTime(pendingChange.desired.revealAtMinuteOfDay)}",
-                        color = MaterialTheme.colorScheme.secondary
+                        text = stringResource(
+                            R.string.pending_change_summary,
+                            pendingChange.desired.dailyLimitMinutes,
+                            formatTime(pendingChange.desired.hideAtMinuteOfDay),
+                            formatTime(pendingChange.desired.revealAtMinuteOfDay)
+                        ),
+                        color = MaterialTheme.colorScheme.secondary,
+                        fontWeight = FontWeight.Medium
                     )
                 }
                 Text(
-                    text = "Applies on or after epoch day: ${pendingChange.eligibleFromEpochDay}",
+                    text = stringResource(R.string.pending_applies_epoch_day, pendingChange.eligibleFromEpochDay),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -970,17 +986,19 @@ fun BatchConfigDialog(
 @Composable
 fun EditTargetDialog(
     target: TargetAppConfig,
+    effectiveConfig: TargetAppConfig? = null,
+    pendingChange: PendingChange? = null,
     onDismiss: () -> Unit,
     onSave: (TargetAppConfig) -> Unit,
     onRemove: (String) -> Unit
 ) {
     val context = LocalContext.current
 
-    var dailyLimit by remember { mutableIntStateOf(target.dailyLimitMinutes) }
-    var hideMinute by remember { mutableIntStateOf(target.hideAtMinuteOfDay) }
-    var revealMinute by remember { mutableIntStateOf(target.revealAtMinuteOfDay) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
-    var showConfirmRemove by remember { mutableStateOf(false) }
+    var dailyLimit by remember(target.packageName) { mutableIntStateOf(target.dailyLimitMinutes) }
+    var hideMinute by remember(target.packageName) { mutableIntStateOf(target.hideAtMinuteOfDay) }
+    var revealMinute by remember(target.packageName) { mutableIntStateOf(target.revealAtMinuteOfDay) }
+    var errorMessage by remember(target.packageName) { mutableStateOf<String?>(null) }
+    var showConfirmRemove by remember(target.packageName) { mutableStateOf(false) }
 
     if (showConfirmRemove) {
         AlertDialog(
@@ -1012,7 +1030,42 @@ fun EditTargetDialog(
         text = {
             Column {
                 Text(text = target.packageName, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyLarge)
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(8.dp))
+
+                if (effectiveConfig != null) {
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(8.dp)) {
+                            Text(
+                                text = stringResource(
+                                    R.string.edit_current_effective,
+                                    effectiveConfig.dailyLimitMinutes,
+                                    formatTime(effectiveConfig.hideAtMinuteOfDay),
+                                    formatTime(effectiveConfig.revealAtMinuteOfDay)
+                                ),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            if (pendingChange != null && pendingChange.desired != null) {
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = stringResource(
+                                        R.string.edit_pending_update,
+                                        pendingChange.desired.dailyLimitMinutes,
+                                        formatTime(pendingChange.desired.hideAtMinuteOfDay),
+                                        formatTime(pendingChange.desired.revealAtMinuteOfDay)
+                                    ),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.secondary,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
 
                 OutlinedTextField(
                     value = dailyLimit.toString(),
@@ -1084,11 +1137,11 @@ fun EditTargetDialog(
             Button(
                 onClick = {
                     if (dailyLimit !in 1..1440) {
-                        errorMessage = "Daily limit must be between 1 and 1440 minutes"
+                        errorMessage = context.getString(R.string.error_daily_limit_range)
                         return@Button
                     }
                     if (hideMinute == revealMinute) {
-                        errorMessage = "Hide time and reveal time cannot be identical"
+                        errorMessage = context.getString(R.string.error_identical_times)
                         return@Button
                     }
                     onSave(

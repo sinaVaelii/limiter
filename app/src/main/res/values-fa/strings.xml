@@ -60,4 +60,13 @@
     <string name="locked_readonly_msg">این برنامه در حال حاضر قفل است. امکان تغییر تنظیمات در حالت قفل وجود ندارد.</string>
     <string name="back">بازگشت</string>
     <string name="add_apps">افزودن برنامه‌ها</string>
+
+    <!-- وضعیت تغییرات معوق و ویرایش -->
+    <string name="pending_removal">تغییر معوق: حذف برنامه (اعمال از فردا)</string>
+    <string name="pending_change_summary">تغییر معوق: سقف %1$d دقیقه، بازه %2$s تا %3$s</string>
+    <string name="pending_applies_epoch_day">اعمال در روز مبدا یا پس از آن: %1$d</string>
+    <string name="edit_current_effective">تنظیمات فعال فعلی: سقف %1$d دقیقه، بازه %2$s تا %3$s</string>
+    <string name="edit_pending_update">تغییر معوق: سقف %1$d دقیقه، بازه %2$s تا %3$s (اعمال از فردا)</string>
+    <string name="error_daily_limit_range">سقف مصرف روزانه باید بین ۱ تا ۱۴۴۰ دقیقه باشد</string>
+    <string name="error_identical_times">زمان شروع و پایان قفل نمی‌توانند یکسان باشند</string>
 </resources>
