@@ -18,7 +18,7 @@
 
 ---
 
-**Limiter** is a personal Android app built for Xiaomi Redmi 12 (Android 15).
+**Limiter** is a personal Android app built for  (Android 15).
 
 It does two things:
 1. **Daily limit** — if you use an app for more than X minutes, it locks until tomorrow morning
@@ -125,4 +125,4 @@ $ANDROID_HOME/build-tools/34.0.0/apksigner verify --verbose app/build/outputs/ap
 
 ---
 
-*ساخته‌شده برای استفاده شخصی روی Xiaomi Redmi 12 / Android 15.*
+*ساخته‌شده برای استفاده عمومی روی اندورید15 *
