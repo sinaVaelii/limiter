@@ -40,8 +40,8 @@ android {
         // DEVICE_API_LEVEL — must match the actual test device (API 35).
         minSdk = 35
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "1.5.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }

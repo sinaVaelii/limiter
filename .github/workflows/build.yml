@@ -1,8 +1,9 @@
-name: Stage 1 Build
+name: CI Build
 
 on:
   push:
     branches: [ "main" ]
+    tags: [ "v*" ]
   pull_request:
     branches: [ "main" ]
 
@@ -17,7 +18,9 @@ jobs:
       with:
         java-version: '17'
         distribution: 'temurin'
-        cache: gradle
+
+    - name: Setup Gradle
+      uses: gradle/actions/setup-gradle@v4
 
     - name: Grant execute permission for gradlew
       run: chmod +x gradlew
@@ -31,4 +34,4 @@ jobs:
         echo "keyPassword=limiter" >> keystore.properties
 
     - name: Build with Gradle
-      run: ./gradlew assembleDebug testDebugUnitTest
+      run: ./gradlew assembleDebug testDebugUnitTest --stacktrace
