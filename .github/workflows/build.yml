@@ -13,25 +13,84 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-    - name: set up JDK 17
+
+    - name: Set up JDK 17
       uses: actions/setup-java@v4
       with:
         java-version: '17'
         distribution: 'temurin'
+        cache: 'gradle'
 
+    # ── Layer 1: Cache the Gradle distribution zip independently. ────────────
+    # This cache is keyed on the exact distributionUrl from wrapper properties.
+    # On a cache hit the zip is already present in ~/.gradle/wrapper/dists and
+    # the wrapper skips the network entirely, making the next steps instant.
+    - name: Cache Gradle distribution zip
+      id: gradle-dist-cache
+      uses: actions/cache@v4
+      with:
+        path: ~/.gradle/wrapper/dists
+        key: gradle-dist-${{ hashFiles('gradle/wrapper/gradle-wrapper.properties') }}
+        restore-keys: gradle-dist-
+
+    # ── Layer 2: Setup Gradle (handles Gradle home / build-output caching). ──
     - name: Setup Gradle
       uses: gradle/actions/setup-gradle@v4
+      with:
+        # Let the distribution zip cache above own the dist; Gradle home for
+        # everything else.
+        gradle-home-cache-includes: |
+          caches
+          notifications
+        cache-read-only: false
 
     - name: Grant execute permission for gradlew
       run: chmod +x gradlew
 
+    # ── Layer 3: Pre-warm the distribution with a bounded retry. ─────────────
+    # Only runs on a cache miss (the dist zip was not restored above).
+    # Retries up to 3 times with a 30-second back-off before failing the job.
+    # The isolated step means a transient network failure here never contaminates
+    # the compilation/test step; the failure message is unambiguous.
+    - name: Pre-warm Gradle distribution (with retry)
+      if: steps.gradle-dist-cache.outputs.cache-hit != 'true'
+      run: |
+        MAX_ATTEMPTS=3
+        DELAY=30
+        attempt=1
+        while [ $attempt -le $MAX_ATTEMPTS ]; do
+          echo "::group::Distribution download attempt $attempt of $MAX_ATTEMPTS"
+          if ./gradlew --version --no-daemon; then
+            echo "::endgroup::"
+            echo "Gradle distribution downloaded successfully on attempt $attempt."
+            exit 0
+          fi
+          echo "::endgroup::"
+          if [ $attempt -lt $MAX_ATTEMPTS ]; then
+            echo "Attempt $attempt failed. Waiting ${DELAY}s before retry..."
+            sleep $DELAY
+          fi
+          attempt=$((attempt + 1))
+        done
+        echo "::error::Gradle distribution download failed after $MAX_ATTEMPTS attempts."
+        exit 1
+
     - name: Generate dummy keystore for CI
       run: |
-        keytool -genkeypair -v -keystore limiter.jks -alias limiter -keyalg RSA -keysize 2048 -validity 10000 -storepass limiter -keypass limiter -dname "CN=Limiter, OU=Limiter, O=Limiter, L=Unknown, ST=Unknown, C=Unknown"
-        echo "storeFile=limiter.jks" > keystore.properties
-        echo "storePassword=limiter" >> keystore.properties
-        echo "keyAlias=limiter" >> keystore.properties
-        echo "keyPassword=limiter" >> keystore.properties
+        keytool -genkeypair -v \
+          -keystore limiter.jks \
+          -alias limiter \
+          -keyalg RSA \
+          -keysize 2048 \
+          -validity 10000 \
+          -storepass limiter \
+          -keypass limiter \
+          -dname "CN=Limiter, OU=Limiter, O=Limiter, L=Unknown, ST=Unknown, C=Unknown"
+        echo "storeFile=limiter.jks"    >  keystore.properties
+        echo "storePassword=limiter"   >> keystore.properties
+        echo "keyAlias=limiter"        >> keystore.properties
+        echo "keyPassword=limiter"     >> keystore.properties
 
-    - name: Build with Gradle
+    # ── Distribution is guaranteed present here (cache hit or pre-warm). ─────
+    - name: Build and test
       run: ./gradlew assembleDebug testDebugUnitTest --stacktrace
