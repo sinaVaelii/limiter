@@ -1,0 +1,31 @@
+# Gradle & Build
+.gradle/
+build/
+**/build/
+!gradle-wrapper.jar
+*.zip
+*.tar.gz
+
+# IDE & OS
+.idea/
+*.iml
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# Local configuration & Secrets
+local.properties
+keystore.properties
+*.jks
+*.keystore
+
+# APK & AAB files
+*.apk
+*.ap_
+*.aab
+
+# Generated / Android Studio
+captures/
+.externalNativeBuild/
+.cxx/

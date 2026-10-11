@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">لیمیتر</string>
+
+    <!-- وضعیت سیستم و راه‌اندازی -->
+    <string name="status_title">وضعیت سیستم</string>
+    <string name="status_device_owner">مالک دستگاه (Device Owner)</string>
+    <string name="status_usage_access">دسترسی آمار استفاده (Usage Access)</string>
+    <string name="status_notifications">اعلان‌ها</string>
+    <string name="status_exact_alarm">هشدار دقیق (Exact Alarm)</string>
+    <string name="status_device_policy">سیاست خودمحافظتی</string>
+    <string name="status_active">فعال</string>
+    <string name="status_granted">اعطا شده</string>
+    <string name="status_missing">ناموجود</string>
+    <string name="status_not_granted">اعطا نشده</string>
+    <string name="status_blocked">اعمال شده</string>
+    <string name="status_not_configured">غیرفعال</string>
+    <string name="device_owner_cmd_hint">دستور تنظیم مالک دستگاه:\nadb shell dpm set-device-owner com.limiter.app/.admin.LimiterAdminReceiver</string>
+    <string name="grant_permission">اعطا</string>
+
+    <!-- صفحه حالت خود‌قفل با شمارش معکوس -->
+    <string name="self_lock_title">رابط مدیریت قفل است</string>
+    <string name="self_lock_subtitle">لیمیتر در بازه محدودیت زمان‌بندی‌شده قفل شده است</string>
+    <string name="self_lock_countdown_label">زمان باقی‌مانده تا بازگشایی رابط مدیریت:</string>
+    <string name="self_lock_expected_unlock">زمان پیش‌بینی‌شده بازگشایی: %1$s</string>
+    <string name="self_lock_explanation">محدودیت‌های برنامه‌ها و ردیابی مصرف در پس‌زمینه به طور کامل در حال اجرا هستند. تا پایان این بازه زمانی، دسترسی به تنظیمات، ویرایش یا حذف آن‌ها امکان‌پذیر نیست.</string>
+    <string name="self_lock_active_apps_title">برنامه‌های محدود در این بازه:</string>
+
+    <!-- کارت‌های هدف و داشبورد -->
+    <string name="configured_apps_title">برنامه‌های تحت مدیریت</string>
+    <string name="no_apps_configured">هنوز برنامه‌ای تنظیم نشده است. دکمه \'+\' را برای افزودن لمس کنید.</string>
+    <string name="target_used_limit">%1$d از %2$d دقیقه مصرف شده</string>
+    <string name="target_remaining">%1$d دقیقه باقی‌مانده</string>
+    <string name="target_limit_reached">سقف مصرف روزانه پر شد</string>
+    <string name="target_status_locked">قفل تا %1$s</string>
+    <string name="target_status_restoring">در حال بازیابی</string>
+    <string name="target_status_unlocked">آزاد</string>
+    <string name="target_schedule_window">بازه قفل: %1$s تا %2$s</string>
+    <string name="edit_target">ویرایش</string>
+    <string name="remove_target">حذف</string>
+
+    <!-- انتخاب برنامه و دیالوگ‌ها -->
+    <string name="app_picker_title">انتخاب برنامه‌ها</string>
+    <string name="search_placeholder">جستجوی برنامه‌ها…</string>
+    <string name="select_all">انتخاب همه</string>
+    <string name="clear_selection">پاک کردن</string>
+    <string name="selected_count">%1$d انتخاب شده</string>
+    <string name="no_apps_found">هیچ برنامه کاربری واجد شرایطی یافت نشد.</string>
+    <string name="configure_selected">تنظیم موارد انتخابی</string>
+    <string name="batch_config_title">تنظیم دسته‌ای محدودیت‌ها</string>
+    <string name="edit_config_title">ویرایش محدودیت برنامه</string>
+    <string name="daily_limit_label">سقف مصرف روزانه (دقیقه، ۱ تا ۱۴۴۰)</string>
+    <string name="hide_time_label">زمان شروع قفل (مخفی‌سازی)</string>
+    <string name="reveal_time_label">زمان پایان قفل (نمایش مجدد)</string>
+    <string name="apply">اعمال</string>
+    <string name="cancel">انصراف</string>
+    <string name="confirm_remove_title">حذف برنامه</string>
+    <string name="confirm_remove_msg">آیا از حذف %1$s اطمینان دارید؟ تغییرات تسهیل یا حذف برنامه از فردا اعمال خواهد شد.</string>
+    <string name="locked_readonly_title">برنامه قفل است</string>
+    <string name="locked_readonly_msg">این برنامه در حال حاضر قفل است. امکان تغییر تنظیمات در حالت قفل وجود ندارد.</string>
+    <string name="back">بازگشت</string>
+    <string name="add_apps">افزودن برنامه‌ها</string>
+</resources>

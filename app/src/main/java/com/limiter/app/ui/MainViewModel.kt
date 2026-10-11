@@ -1,0 +1,358 @@
+package com.limiter.app.ui
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewModelScope
+import com.limiter.app.LimiterApp
+import com.limiter.app.data.AppDiscoveryRepository
+import com.limiter.app.data.CriticalPackageResolver
+import com.limiter.app.data.DiscoveredApp
+import com.limiter.app.data.LockStateStore
+import com.limiter.app.data.SettingsRepository
+import com.limiter.app.data.UsageSnapshotStore
+import com.limiter.app.dpm.DpmGateway
+import com.limiter.app.model.LockRecord
+import com.limiter.app.model.PendingChange
+import com.limiter.app.model.TargetAppConfig
+import com.limiter.app.model.UsageSnapshot
+import com.limiter.app.policy.LockCoordinator
+import com.limiter.app.policy.SettingsPolicy
+import com.limiter.app.time.TimeSource
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
+
+import com.limiter.app.data.SystemStatus
+import com.limiter.app.data.SystemStatusChecker
+import com.limiter.app.policy.SelfLockPolicy
+
+data class BatchResult(
+    val succeededPackages: List<String> = emptyList(),
+    val failedPackages: Map<String, String> = emptyMap(),
+    val deferredPackages: List<String> = emptyList()
+)
+
+data class MainUiState(
+    val isDeviceOwner: Boolean = false,
+    val hasUsageAccess: Boolean = false,
+    val hasNotificationPermission: Boolean = false,
+    val hasExactAlarmPermission: Boolean = false,
+    val isUninstallBlocked: Boolean = false,
+    val isUserControlDisabled: Boolean = false,
+    val targets: Map<String, TargetAppConfig> = emptyMap(),
+    val lockStates: Map<String, LockRecord> = emptyMap(),
+    val usages: Map<String, UsageSnapshot> = emptyMap(),
+    val pendingChanges: List<PendingChange> = emptyList(),
+    val availableApps: List<DiscoveredApp> = emptyList(),
+    val isLoadingApps: Boolean = false,
+    val searchQuery: String = "",
+    val selectedPackages: Set<String> = emptySet(),
+    val batchResult: BatchResult? = null,
+    val feedbackMessage: String? = null,
+    val selfLockStatus: SelfLockPolicy.SelfLockStatus = SelfLockPolicy.SelfLockStatus(false),
+    val currentMillis: Long = 0L
+)
+
+private data class CoreState(
+    val targets: Map<String, TargetAppConfig>,
+    val lockStates: Map<String, LockRecord>,
+    val usages: Map<String, UsageSnapshot>,
+    val pending: List<PendingChange>
+)
+
+private data class PickerState(
+    val availableApps: List<DiscoveredApp>,
+    val isLoadingApps: Boolean,
+    val searchQuery: String,
+    val selectedPackages: Set<String>,
+    val batchResult: BatchResult?
+)
+
+class MainViewModel(
+    private val dpmGateway: DpmGateway,
+    private val settingsRepository: SettingsRepository,
+    private val lockStateStore: LockStateStore,
+    private val usageSnapshotStore: UsageSnapshotStore,
+    val timeSource: TimeSource,
+    val lockCoordinator: LockCoordinator?,
+    private val appDiscoveryRepository: AppDiscoveryRepository? = null,
+    private val criticalPackageResolver: CriticalPackageResolver? = null,
+    private val systemStatusChecker: SystemStatusChecker? = null
+) : ViewModel() {
+
+    private val _availableApps = MutableStateFlow<List<DiscoveredApp>>(emptyList())
+    private val _isLoadingApps = MutableStateFlow(false)
+    private val _searchQuery = MutableStateFlow("")
+    private val _selectedPackages = MutableStateFlow<Set<String>>(emptySet())
+    private val _batchResult = MutableStateFlow<BatchResult?>(null)
+    private val _feedbackMessage = MutableStateFlow<String?>(null)
+    private val _currentMillis = MutableStateFlow(timeSource.nowMillis())
+    private val _systemStatus = MutableStateFlow(
+        systemStatusChecker?.checkStatus() ?: SystemStatus(isDeviceOwner = dpmGateway.isDeviceOwner())
+    )
+
+    fun tickCurrentTime() {
+        _currentMillis.value = timeSource.nowMillis()
+    }
+
+    fun refreshSystemStatus() {
+        _systemStatus.value = systemStatusChecker?.checkStatus()
+            ?: SystemStatus(isDeviceOwner = dpmGateway.isDeviceOwner())
+        _currentMillis.value = timeSource.nowMillis()
+    }
+
+    val uiState: StateFlow<MainUiState> = combine(
+        combine(
+            settingsRepository.targets,
+            lockStateStore.states,
+            usageSnapshotStore.snapshots,
+            settingsRepository.pendingChanges
+        ) { targets, lockStates, usages, pending ->
+            CoreState(targets, lockStates, usages, pending)
+        },
+        combine(
+            _availableApps,
+            _isLoadingApps,
+            _searchQuery,
+            _selectedPackages,
+            _batchResult
+        ) { apps, loading, query, selected, batch ->
+            PickerState(apps, loading, query, selected, batch)
+        },
+        _systemStatus,
+        _currentMillis,
+        _feedbackMessage
+    ) { core, picker, systemStatus, nowMillis, feedback ->
+        val selfLock = SelfLockPolicy.calculateSelfLockStatus(
+            targets = core.targets,
+            nowMillis = nowMillis,
+            zone = timeSource.zone(),
+            protectedPackages = criticalPackageResolver?.resolveProtected() ?: emptySet()
+        )
+        MainUiState(
+            isDeviceOwner = systemStatus.isDeviceOwner,
+            hasUsageAccess = systemStatus.hasUsageAccess,
+            hasNotificationPermission = systemStatus.hasNotificationPermission,
+            hasExactAlarmPermission = systemStatus.hasExactAlarmPermission,
+            isUninstallBlocked = systemStatus.isUninstallBlocked,
+            isUserControlDisabled = systemStatus.isUserControlDisabled,
+            targets = core.targets,
+            lockStates = core.lockStates,
+            usages = core.usages,
+            pendingChanges = core.pending,
+            availableApps = picker.availableApps,
+            isLoadingApps = picker.isLoadingApps,
+            searchQuery = picker.searchQuery,
+            selectedPackages = picker.selectedPackages,
+            batchResult = picker.batchResult,
+            feedbackMessage = feedback,
+            selfLockStatus = selfLock,
+            currentMillis = nowMillis
+        )
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.Eagerly,
+        initialValue = MainUiState(
+            isDeviceOwner = dpmGateway.isDeviceOwner(),
+            currentMillis = timeSource.nowMillis()
+        )
+    )
+
+    fun loadAvailableApps() {
+        val repo = appDiscoveryRepository ?: return
+        viewModelScope.launch {
+            _isLoadingApps.value = true
+            try {
+                val currentTargets = settingsRepository.snapshotTargets().keys
+                val apps = repo.getEligibleApps(currentTargets)
+                _availableApps.value = apps
+            } catch (e: Exception) {
+                _feedbackMessage.value = "Failed to load apps: ${e.message}"
+            } finally {
+                _isLoadingApps.value = false
+            }
+        }
+    }
+
+    fun setSearchQuery(query: String) {
+        _searchQuery.value = query
+    }
+
+    fun togglePackageSelection(packageName: String) {
+        val current = _selectedPackages.value
+        _selectedPackages.value = if (packageName in current) {
+            current - packageName
+        } else {
+            current + packageName
+        }
+    }
+
+    fun selectAllEligible(filteredList: List<DiscoveredApp>) {
+        val current = _selectedPackages.value
+        _selectedPackages.value = current + filteredList.map { it.packageName }
+    }
+
+    fun clearSelections() {
+        _selectedPackages.value = emptySet()
+    }
+
+    fun clearFeedbackMessage() {
+        _feedbackMessage.value = null
+    }
+
+    fun clearBatchResult() {
+        _batchResult.value = null
+    }
+
+    /**
+     * Submit batch configuration for multiple selected applications.
+     * Evaluates domain rules, performs sequential addition with per-package outcome reporting,
+     * reconciles and reschedules.
+     */
+    fun submitBatchConfig(
+        packageNames: Set<String>,
+        dailyLimitMinutes: Int,
+        hideAtMinuteOfDay: Int,
+        revealAtMinuteOfDay: Int
+    ) {
+        viewModelScope.launch {
+            if (uiState.value.selfLockStatus.isSelfLocked) {
+                _feedbackMessage.value = "Management controls are locked during active restriction window"
+                return@launch
+            }
+            if (packageNames.isEmpty()) {
+                _feedbackMessage.value = "No applications selected"
+                return@launch
+            }
+            if (dailyLimitMinutes !in 1..1440) {
+                _feedbackMessage.value = "Daily limit must be between 1 and 1440 minutes"
+                return@launch
+            }
+            if (hideAtMinuteOfDay !in 0..1439 || revealAtMinuteOfDay !in 0..1439) {
+                _feedbackMessage.value = "Times must be between 00:00 and 23:59"
+                return@launch
+            }
+            if (hideAtMinuteOfDay == revealAtMinuteOfDay) {
+                _feedbackMessage.value = "Hide time and reveal time cannot be identical"
+                return@launch
+            }
+
+            val coordinator = lockCoordinator
+            if (coordinator == null) {
+                _feedbackMessage.value = "Lock coordinator is not available"
+                return@launch
+            }
+
+            val succeeded = mutableListOf<String>()
+            val failed = mutableMapOf<String, String>()
+            val deferred = mutableListOf<String>()
+
+            for (pkg in packageNames) {
+                try {
+                    val config = TargetAppConfig(
+                        packageName = pkg,
+                        dailyLimitMinutes = dailyLimitMinutes,
+                        hideAtMinuteOfDay = hideAtMinuteOfDay,
+                        revealAtMinuteOfDay = revealAtMinuteOfDay
+                    )
+                    val result = coordinator.tryEditConfig(config)
+                    when (result) {
+                        is SettingsPolicy.EditResult.Applied -> succeeded.add(pkg)
+                        is SettingsPolicy.EditResult.Deferred -> deferred.add(pkg)
+                        is SettingsPolicy.EditResult.PartialApplied -> succeeded.add(pkg)
+                        is SettingsPolicy.EditResult.Protected -> failed[pkg] = "Protected package"
+                        is SettingsPolicy.EditResult.Duplicate -> failed[pkg] = "Already configured"
+                        is SettingsPolicy.EditResult.NotFound -> failed[pkg] = "Not found"
+                        is SettingsPolicy.EditResult.Invalid -> failed[pkg] = "Invalid: ${result.reason}"
+                    }
+                } catch (e: Exception) {
+                    failed[pkg] = e.message ?: "Configuration error"
+                }
+            }
+
+            if (succeeded.isNotEmpty() || deferred.isNotEmpty()) {
+                coordinator.reconcile()
+                loadAvailableApps()
+            }
+
+            val res = BatchResult(
+                succeededPackages = succeeded,
+                failedPackages = failed,
+                deferredPackages = deferred
+            )
+            _batchResult.value = res
+            _selectedPackages.value = emptySet()
+            
+            val totalApplied = succeeded.size + deferred.size
+            _feedbackMessage.value = "Added $totalApplied app(s)" +
+                    if (failed.isNotEmpty()) " (${failed.size} failed)" else ""
+        }
+    }
+
+    /**
+     * Submit single target configuration (used when editing existing targets per Requirement 2).
+     */
+    fun submitConfig(config: TargetAppConfig) {
+        viewModelScope.launch {
+            if (uiState.value.selfLockStatus.isSelfLocked) {
+                _feedbackMessage.value = "Management controls are locked during active restriction window"
+                return@launch
+            }
+            val coordinator = lockCoordinator ?: return@launch
+            val result = coordinator.tryEditConfig(config)
+            coordinator.reconcile()
+            when (result) {
+                is SettingsPolicy.EditResult.Applied -> _feedbackMessage.value = "Updated ${config.packageName}"
+                is SettingsPolicy.EditResult.Deferred -> _feedbackMessage.value = "Changes to ${config.packageName} deferred to tomorrow"
+                is SettingsPolicy.EditResult.PartialApplied -> _feedbackMessage.value = "Tightening applied; loosening deferred to tomorrow"
+                is SettingsPolicy.EditResult.Invalid -> _feedbackMessage.value = "Invalid configuration: ${result.reason}"
+                is SettingsPolicy.EditResult.Protected -> _feedbackMessage.value = "${config.packageName} is protected"
+                else -> {}
+            }
+        }
+    }
+
+    /**
+     * Submit target removal (used when removing existing targets per Requirement 2).
+     */
+    fun removeConfig(packageName: String) {
+        viewModelScope.launch {
+            if (uiState.value.selfLockStatus.isSelfLocked) {
+                _feedbackMessage.value = "Management controls are locked during active restriction window"
+                return@launch
+            }
+            val coordinator = lockCoordinator ?: return@launch
+            val result = coordinator.tryRemoveConfig(packageName)
+            coordinator.reconcile()
+            loadAvailableApps()
+            when (result) {
+                is SettingsPolicy.RemoveResult.Deferred -> {
+                    _feedbackMessage.value = "Removal of $packageName deferred to epoch day ${result.pending.eligibleFromEpochDay}"
+                }
+                is SettingsPolicy.RemoveResult.NotFound -> {
+                    _feedbackMessage.value = "$packageName not found"
+                }
+            }
+        }
+    }
+
+    class Factory(private val app: LimiterApp) : ViewModelProvider.Factory {
+        @Suppress("UNCHECKED_CAST")
+        override fun <T : ViewModel> create(modelClass: Class<T>): T {
+            return MainViewModel(
+                app.dpmGateway,
+                app.settingsRepository,
+                app.lockStateStore,
+                app.usageSnapshotStore,
+                app.timeSource,
+                app.lockCoordinator,
+                app.appDiscoveryRepository,
+                app.criticalPackageResolver,
+                app.systemStatusChecker
+            ) as T
+        }
+    }
+}

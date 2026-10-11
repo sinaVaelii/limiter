@@ -1,0 +1,62 @@
+<resources>
+    <string name="app_name">Limiter</string>
+
+    <!-- System Status & Onboarding -->
+    <string name="status_title">System Status</string>
+    <string name="status_device_owner">Device Owner</string>
+    <string name="status_usage_access">Usage Access</string>
+    <string name="status_notifications">Notifications</string>
+    <string name="status_exact_alarm">Exact Alarm</string>
+    <string name="status_device_policy">Self-Protection Policy</string>
+    <string name="status_active">Active</string>
+    <string name="status_granted">Granted</string>
+    <string name="status_missing">Missing</string>
+    <string name="status_not_granted">Not Granted</string>
+    <string name="status_blocked">Enforced</string>
+    <string name="status_not_configured">Disabled</string>
+    <string name="device_owner_cmd_hint">Provision command:\nadb shell dpm set-device-owner com.limiter.app/.admin.LimiterAdminReceiver</string>
+    <string name="grant_permission">Grant</string>
+
+    <!-- Self-Lock Restricted Mode Screen -->
+    <string name="self_lock_title">Management Controls Locked</string>
+    <string name="self_lock_subtitle">Limiter is self-locked during scheduled restriction window</string>
+    <string name="self_lock_countdown_label">Time until management controls unlock:</string>
+    <string name="self_lock_expected_unlock">Expected unlock time: %1$s</string>
+    <string name="self_lock_explanation">Application restrictions and background usage monitoring continue operating normally. Management controls cannot be accessed, modified, or bypassed until this restriction window concludes.</string>
+    <string name="self_lock_active_apps_title">Applications restricted in this window:</string>
+
+    <!-- Target Cards & Dashboard -->
+    <string name="configured_apps_title">Managed Applications</string>
+    <string name="no_apps_configured">No applications configured yet. Tap \'+\' to add applications.</string>
+    <string name="target_used_limit">%1$d / %2$d min used</string>
+    <string name="target_remaining">%1$d min remaining</string>
+    <string name="target_limit_reached">Daily limit reached</string>
+    <string name="target_status_locked">Locked until %1$s</string>
+    <string name="target_status_restoring">Restoration pending</string>
+    <string name="target_status_unlocked">Unlocked</string>
+    <string name="target_schedule_window">Lock window: %1$s – %2$s</string>
+    <string name="edit_target">Edit</string>
+    <string name="remove_target">Remove</string>
+
+    <!-- App Picker & Dialogs -->
+    <string name="app_picker_title">Select Applications</string>
+    <string name="search_placeholder">Search applications…</string>
+    <string name="select_all">Select All</string>
+    <string name="clear_selection">Clear</string>
+    <string name="selected_count">%1$d selected</string>
+    <string name="no_apps_found">No eligible user applications found.</string>
+    <string name="configure_selected">Configure Selected</string>
+    <string name="batch_config_title">Configure Selected Apps</string>
+    <string name="edit_config_title">Edit Application Config</string>
+    <string name="daily_limit_label">Daily usage limit (minutes, 1–1440)</string>
+    <string name="hide_time_label">Lock start time (Hide)</string>
+    <string name="reveal_time_label">Lock end time (Reveal)</string>
+    <string name="apply">Apply</string>
+    <string name="cancel">Cancel</string>
+    <string name="confirm_remove_title">Remove Application</string>
+    <string name="confirm_remove_msg">Are you sure you want to remove %1$s? Loosening or removal changes will take effect tomorrow.</string>
+    <string name="locked_readonly_title">Application Locked</string>
+    <string name="locked_readonly_msg">This application is currently locked. Configuration cannot be altered while locked.</string>
+    <string name="back">Back</string>
+    <string name="add_apps">Add Applications</string>
+</resources>
