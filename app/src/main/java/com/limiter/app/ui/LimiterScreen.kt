@@ -5,6 +5,7 @@ import android.content.Intent
 import android.graphics.drawable.Drawable
 import android.net.Uri
 import android.provider.Settings
+import com.limiter.app.policy.SettingsPolicy
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -87,19 +88,73 @@ import java.time.format.DateTimeFormatter
 fun LimiterScreen(viewModel: MainViewModel) {
     val state by viewModel.uiState.collectAsState()
 
-    // 1. Self-Lock Mode Branching (User prompt & R4 requirement)
-    // While self-lock is active during a scheduled window, management controls are restricted
-    // and replaced by the full-screen live countdown screen.
-    if (state.selfLockStatus.isSelfLocked) {
-        SelfLockScreen(state = state, onTick = { viewModel.tickCurrentTime() })
-        return
+    // Refresh ticker driven by TimeSource for live countdown across all screens and exact-boundary updates
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(1000L)
+            viewModel.tickCurrentTime()
+        }
     }
 
-    // 2. Normal Management Dashboard
+    var showDashboardInSelfLock by remember { mutableStateOf(false) }
     var showAppPicker by remember { mutableStateOf(false) }
     var showBatchConfigDialog by remember { mutableStateOf(false) }
     var editingTarget by remember { mutableStateOf<TargetAppConfig?>(null) }
     var lockedReadOnlyTarget by remember { mutableStateOf<Pair<String, LockState.LockedUntil>?>(null) }
+
+    // 1. Self-Lock Mode Branching (Rule B)
+    // While self-lock is active during a scheduled window, management controls show
+    // the full-screen live countdown screen by default, while allowing adding new target apps
+    // and navigating to the dashboard to view limits/usage and perform tightening.
+    if (state.selfLockStatus.isSelfLocked && !showDashboardInSelfLock) {
+        SelfLockScreen(
+            state = state,
+            onAddApp = {
+                viewModel.loadAvailableApps()
+                showAppPicker = true
+            },
+            onViewDashboard = {
+                showDashboardInSelfLock = true
+            }
+        )
+
+        if (showAppPicker) {
+            AppPickerDialog(
+                state = state,
+                onSearchQueryChange = { viewModel.setSearchQuery(it) },
+                onTogglePackage = { viewModel.togglePackageSelection(it) },
+                onSelectAll = { viewModel.selectAllEligible(it) },
+                onClearSelections = { viewModel.clearSelections() },
+                onDismiss = { showAppPicker = false },
+                onProceedToConfigure = {
+                    showAppPicker = false
+                    showBatchConfigDialog = true
+                }
+            )
+        }
+
+        if (showBatchConfigDialog) {
+            BatchConfigDialog(
+                selectedCount = state.selectedPackages.size,
+                isSelfLocked = true,
+                onDismiss = {
+                    showBatchConfigDialog = false
+                    viewModel.clearSelections()
+                },
+                onApply = { limit, hide, reveal ->
+                    viewModel.submitBatchConfig(
+                        packageNames = state.selectedPackages,
+                        dailyLimitMinutes = limit,
+                        hideAtMinuteOfDay = hide,
+                        revealAtMinuteOfDay = reveal
+                    )
+                    showBatchConfigDialog = false
+                }
+            )
+        }
+
+        return
+    }
 
     Scaffold(
         topBar = {
@@ -123,6 +178,45 @@ fun LimiterScreen(viewModel: MainViewModel) {
                 .padding(innerPadding)
                 .padding(16.dp)
         ) {
+            // Self-lock countdown banner when viewing dashboard during self-lock
+            if (state.selfLockStatus.isSelfLocked) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        val unlockMillis = state.selfLockStatus.unlockTimeMillis ?: 0L
+                        val remainingMillis = maxOf(0L, unlockMillis - state.currentMillis)
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = stringResource(R.string.self_lock_title),
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                            Text(
+                                text = "${stringResource(R.string.self_lock_countdown_label)} ${SelfLockPolicy.formatRemainingTime(remainingMillis)}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                        }
+                        TextButton(
+                            onClick = { showDashboardInSelfLock = false },
+                            modifier = Modifier.height(48.dp)
+                        ) {
+                            Text(stringResource(R.string.back), color = MaterialTheme.colorScheme.onErrorContainer)
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+
             // Feedback message banner
             if (state.feedbackMessage != null) {
                 Card(
@@ -240,6 +334,7 @@ fun LimiterScreen(viewModel: MainViewModel) {
     if (showBatchConfigDialog) {
         BatchConfigDialog(
             selectedCount = state.selectedPackages.size,
+            isSelfLocked = state.selfLockStatus.isSelfLocked,
             onDismiss = {
                 showBatchConfigDialog = false
                 viewModel.clearSelections()
@@ -266,6 +361,7 @@ fun LimiterScreen(viewModel: MainViewModel) {
             target = editingTarget!!,
             effectiveConfig = effectiveConfig,
             pendingChange = pendingChange,
+            isSelfLocked = state.selfLockStatus.isSelfLocked,
             onDismiss = { editingTarget = null },
             onSave = { updatedConfig ->
                 viewModel.submitConfig(updatedConfig)
@@ -294,15 +390,13 @@ fun LimiterScreen(viewModel: MainViewModel) {
  * Dedicated, full-screen self-lock restricted mode screen.
  */
 @Composable
-fun SelfLockScreen(state: MainUiState, onTick: () -> Unit = {}) {
-    var nowMillis by remember { mutableLongStateOf(state.currentMillis) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            kotlinx.coroutines.delay(1000L)
-            nowMillis = System.currentTimeMillis()
-            onTick()
-        }
-    }
+fun SelfLockScreen(
+    state: MainUiState,
+    onTick: () -> Unit = {},
+    onAddApp: () -> Unit = {},
+    onViewDashboard: () -> Unit = {}
+) {
+    val nowMillis = state.currentMillis
     val unlockMillis = state.selfLockStatus.unlockTimeMillis ?: 0L
     val remainingMillis = maxOf(0L, unlockMillis - nowMillis)
     val formattedUnlock = remember(unlockMillis) {
@@ -413,6 +507,29 @@ fun SelfLockScreen(state: MainUiState, onTick: () -> Unit = {}) {
                             )
                         }
                     }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // Allowed actions during self-lock (Rule B)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                OutlinedButton(
+                    onClick = onAddApp,
+                    modifier = Modifier.weight(1f).height(48.dp)
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(stringResource(R.string.add_apps))
+                }
+                Button(
+                    onClick = onViewDashboard,
+                    modifier = Modifier.weight(1f).height(48.dp)
+                ) {
+                    Text(stringResource(R.string.self_lock_view_dashboard))
                 }
             }
         }
@@ -848,9 +965,11 @@ fun AppPickerDialog(
                 } else {
                     LazyColumn(modifier = Modifier.weight(1f)) {
                         items(filteredApps, key = { it.packageName }) { app ->
+                            val isAlreadyLimited = state.selfLockStatus.isSelfLocked && app.packageName in state.targets
                             AppPickerRow(
                                 app = app,
                                 isSelected = state.selectedPackages.contains(app.packageName),
+                                isAlreadyLimited = isAlreadyLimited,
                                 onToggle = { onTogglePackage(app.packageName) }
                             )
                         }
@@ -876,18 +995,23 @@ fun AppPickerDialog(
 fun AppPickerRow(
     app: DiscoveredApp,
     isSelected: Boolean,
+    isAlreadyLimited: Boolean = false,
     onToggle: () -> Unit
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onToggle)
+            .then(
+                if (isAlreadyLimited) Modifier
+                else Modifier.clickable(onClick = onToggle)
+            )
             .padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Checkbox(
             checked = isSelected,
-            onCheckedChange = { onToggle() },
+            onCheckedChange = if (isAlreadyLimited) null else { { onToggle() } },
+            enabled = !isAlreadyLimited,
             modifier = Modifier.size(48.dp)
         )
         Spacer(modifier = Modifier.width(8.dp))
@@ -896,6 +1020,14 @@ fun AppPickerRow(
         Column(modifier = Modifier.weight(1f)) {
             Text(text = app.label, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
             Text(text = app.packageName, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (isAlreadyLimited) {
+                Text(
+                    text = stringResource(R.string.picker_already_limited),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.secondary,
+                    fontWeight = FontWeight.Medium
+                )
+            }
         }
     }
 }
@@ -903,6 +1035,7 @@ fun AppPickerRow(
 @Composable
 fun BatchConfigDialog(
     selectedCount: Int,
+    isSelfLocked: Boolean = false,
     onDismiss: () -> Unit,
     onApply: (limit: Int, hide: Int, reveal: Int) -> Unit
 ) {
@@ -912,6 +1045,31 @@ fun BatchConfigDialog(
     var hideMinute by remember { mutableIntStateOf(23 * 60) }
     var revealMinute by remember { mutableIntStateOf(7 * 60) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    var showConfirmSelfLockAdd by remember { mutableStateOf(false) }
+
+    if (showConfirmSelfLockAdd) {
+        AlertDialog(
+            onDismissRequest = { showConfirmSelfLockAdd = false },
+            title = { Text(stringResource(R.string.self_lock_add_confirmation_title)) },
+            text = { Text(stringResource(R.string.self_lock_add_confirmation)) },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showConfirmSelfLockAdd = false
+                        onApply(dailyLimit, hideMinute, revealMinute)
+                    },
+                    modifier = Modifier.height(48.dp)
+                ) {
+                    Text(stringResource(R.string.confirm))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showConfirmSelfLockAdd = false }, modifier = Modifier.height(48.dp)) {
+                    Text(stringResource(R.string.cancel))
+                }
+            }
+        )
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -986,15 +1144,19 @@ fun BatchConfigDialog(
         confirmButton = {
             Button(
                 onClick = {
-                    if (dailyLimit !in 1..1440) {
-                        errorMessage = "Daily limit must be between 1 and 1440 minutes"
+                    if (dailyLimit !in SettingsPolicy.MIN_DAILY_LIMIT_MINUTES..SettingsPolicy.MAX_DAILY_LIMIT_MINUTES) {
+                        errorMessage = context.getString(R.string.error_daily_limit_range)
                         return@Button
                     }
                     if (hideMinute == revealMinute) {
-                        errorMessage = "Hide time and reveal time cannot be identical"
+                        errorMessage = context.getString(R.string.error_identical_times)
                         return@Button
                     }
-                    onApply(dailyLimit, hideMinute, revealMinute)
+                    if (isSelfLocked) {
+                        showConfirmSelfLockAdd = true
+                    } else {
+                        onApply(dailyLimit, hideMinute, revealMinute)
+                    }
                 },
                 modifier = Modifier.height(48.dp)
             ) {
@@ -1014,6 +1176,7 @@ fun EditTargetDialog(
     target: TargetAppConfig,
     effectiveConfig: TargetAppConfig? = null,
     pendingChange: PendingChange? = null,
+    isSelfLocked: Boolean = false,
     onDismiss: () -> Unit,
     onSave: (TargetAppConfig) -> Unit,
     onRemove: (String) -> Unit
@@ -1025,6 +1188,10 @@ fun EditTargetDialog(
     var revealMinute by remember(target.packageName) { mutableIntStateOf(target.revealAtMinuteOfDay) }
     var errorMessage by remember(target.packageName) { mutableStateOf<String?>(null) }
     var showConfirmRemove by remember(target.packageName) { mutableStateOf(false) }
+
+    val currentActiveLimit = effectiveConfig?.dailyLimitMinutes ?: target.dailyLimitMinutes
+    val currentActiveHide = effectiveConfig?.hideAtMinuteOfDay ?: target.hideAtMinuteOfDay
+    val currentActiveReveal = effectiveConfig?.revealAtMinuteOfDay ?: target.revealAtMinuteOfDay
 
     if (showConfirmRemove) {
         AlertDialog(
@@ -1151,24 +1318,48 @@ fun EditTargetDialog(
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
-                OutlinedButton(
-                    onClick = { showConfirmRemove = true },
-                    modifier = Modifier.fillMaxWidth().height(48.dp)
-                ) {
-                    Text(stringResource(R.string.remove_target), color = MaterialTheme.colorScheme.error)
+                if (isSelfLocked) {
+                    Text(
+                        text = stringResource(R.string.self_lock_controls_locked),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                } else {
+                    OutlinedButton(
+                        onClick = { showConfirmRemove = true },
+                        modifier = Modifier.fillMaxWidth().height(48.dp)
+                    ) {
+                        Text(stringResource(R.string.remove_target), color = MaterialTheme.colorScheme.error)
+                    }
                 }
             }
         },
         confirmButton = {
             Button(
                 onClick = {
-                    if (dailyLimit !in 1..1440) {
+                    if (dailyLimit !in SettingsPolicy.MIN_DAILY_LIMIT_MINUTES..SettingsPolicy.MAX_DAILY_LIMIT_MINUTES) {
                         errorMessage = context.getString(R.string.error_daily_limit_range)
                         return@Button
                     }
                     if (hideMinute == revealMinute) {
                         errorMessage = context.getString(R.string.error_identical_times)
                         return@Button
+                    }
+                    if (isSelfLocked) {
+                        if (dailyLimit > currentActiveLimit) {
+                            errorMessage = context.getString(R.string.self_lock_controls_locked)
+                            return@Button
+                        }
+                        if (SettingsPolicy.isWindowLoosening(currentActiveHide, currentActiveReveal, hideMinute, revealMinute)) {
+                            errorMessage = context.getString(R.string.self_lock_controls_locked)
+                            return@Button
+                        }
+                    } else {
+                        val increase = dailyLimit - currentActiveLimit
+                        if (increase > SettingsPolicy.MAX_LIMIT_INCREASE_MINUTES) {
+                            errorMessage = context.getString(R.string.error_limit_increase_max)
+                            return@Button
+                        }
                     }
                     onSave(
                         target.copy(

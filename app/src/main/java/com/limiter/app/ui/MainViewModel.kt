@@ -24,6 +24,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import com.limiter.app.R
+import android.content.Context
 
 import com.limiter.app.data.SystemStatus
 import com.limiter.app.data.SystemStatusChecker
@@ -83,7 +85,8 @@ class MainViewModel(
     private val criticalPackageResolver: CriticalPackageResolver? = null,
     private val systemStatusChecker: SystemStatusChecker? = null,
     private val timeWindowScheduler: TimeWindowScheduler? = null,
-    private val ioDispatcher: kotlinx.coroutines.CoroutineDispatcher = kotlinx.coroutines.Dispatchers.IO
+    private val ioDispatcher: kotlinx.coroutines.CoroutineDispatcher = kotlinx.coroutines.Dispatchers.IO,
+    private val context: Context? = null
 ) : ViewModel() {
 
     private val _availableApps = MutableStateFlow<List<DiscoveredApp>>(emptyList())
@@ -188,8 +191,9 @@ class MainViewModel(
         viewModelScope.launch {
             _isLoadingApps.value = true
             try {
-                val currentTargets = settingsRepository.snapshotTargets().keys
-                val apps = repo.getEligibleApps(currentTargets)
+                val isSelfLocked = uiState.value.selfLockStatus.isSelfLocked
+                val alreadyConfigured = if (isSelfLocked) emptySet() else settingsRepository.snapshotTargets().keys
+                val apps = repo.getEligibleApps(alreadyConfigured)
                 _availableApps.value = apps
             } catch (e: Exception) {
                 _feedbackMessage.value = "Failed to load apps: ${e.message}"
@@ -204,6 +208,10 @@ class MainViewModel(
     }
 
     fun togglePackageSelection(packageName: String) {
+        val selfLock = uiState.value.selfLockStatus
+        if (selfLock.isSelfLocked && packageName in uiState.value.targets.keys) {
+            return
+        }
         val current = _selectedPackages.value
         _selectedPackages.value = if (packageName in current) {
             current - packageName
@@ -213,8 +221,15 @@ class MainViewModel(
     }
 
     fun selectAllEligible(filteredList: List<DiscoveredApp>) {
+        val selfLock = uiState.value.selfLockStatus
+        val currentTargets = uiState.value.targets
+        val eligiblePkgs = if (selfLock.isSelfLocked) {
+            filteredList.filter { it.packageName !in currentTargets.keys }.map { it.packageName }
+        } else {
+            filteredList.map { it.packageName }
+        }
         val current = _selectedPackages.value
-        _selectedPackages.value = current + filteredList.map { it.packageName }
+        _selectedPackages.value = current + eligiblePkgs
     }
 
     fun clearSelections() {
@@ -241,16 +256,12 @@ class MainViewModel(
         revealAtMinuteOfDay: Int
     ) {
         viewModelScope.launch {
-            if (uiState.value.selfLockStatus.isSelfLocked) {
-                _feedbackMessage.value = "Management controls are locked during active restriction window"
-                return@launch
-            }
             if (packageNames.isEmpty()) {
                 _feedbackMessage.value = "No applications selected"
                 return@launch
             }
-            if (dailyLimitMinutes !in 1..1440) {
-                _feedbackMessage.value = "Daily limit must be between 1 and 1440 minutes"
+            if (dailyLimitMinutes !in SettingsPolicy.MIN_DAILY_LIMIT_MINUTES..SettingsPolicy.MAX_DAILY_LIMIT_MINUTES) {
+                _feedbackMessage.value = getString(R.string.error_daily_limit_range)
                 return@launch
             }
             if (hideAtMinuteOfDay !in 0..1439 || revealAtMinuteOfDay !in 0..1439) {
@@ -258,7 +269,7 @@ class MainViewModel(
                 return@launch
             }
             if (hideAtMinuteOfDay == revealAtMinuteOfDay) {
-                _feedbackMessage.value = "Hide time and reveal time cannot be identical"
+                _feedbackMessage.value = getString(R.string.error_identical_times)
                 return@launch
             }
 
@@ -289,7 +300,7 @@ class MainViewModel(
                         is SettingsPolicy.EditResult.Duplicate -> failed[pkg] = "Already configured"
                         is SettingsPolicy.EditResult.NotFound -> failed[pkg] = "Not found"
                         is SettingsPolicy.EditResult.Invalid -> failed[pkg] = "Invalid: ${result.reason}"
-                        is SettingsPolicy.EditResult.SelfLocked -> failed[pkg] = "Management controls locked"
+                        is SettingsPolicy.EditResult.SelfLocked -> failed[pkg] = getString(R.string.self_lock_controls_locked)
                     }
                 } catch (e: Exception) {
                     failed[pkg] = e.message ?: "Configuration error"
@@ -321,10 +332,6 @@ class MainViewModel(
      */
     fun submitConfig(config: TargetAppConfig) {
         viewModelScope.launch {
-            if (uiState.value.selfLockStatus.isSelfLocked) {
-                _feedbackMessage.value = "Management controls are locked during active restriction window"
-                return@launch
-            }
             val coordinator = lockCoordinator ?: return@launch
             val result = coordinator.tryEditConfig(config)
             coordinator.reconcile()
@@ -335,7 +342,7 @@ class MainViewModel(
                 is SettingsPolicy.EditResult.PartialApplied -> _feedbackMessage.value = "Tightening applied; loosening deferred to tomorrow"
                 is SettingsPolicy.EditResult.Invalid -> _feedbackMessage.value = "Invalid configuration: ${result.reason}"
                 is SettingsPolicy.EditResult.Protected -> _feedbackMessage.value = "${config.packageName} is protected"
-                is SettingsPolicy.EditResult.SelfLocked -> _feedbackMessage.value = "Management controls are locked during active restriction window"
+                is SettingsPolicy.EditResult.SelfLocked -> _feedbackMessage.value = getString(R.string.self_lock_controls_locked)
                 else -> {}
             }
         }
@@ -346,10 +353,6 @@ class MainViewModel(
      */
     fun removeConfig(packageName: String) {
         viewModelScope.launch {
-            if (uiState.value.selfLockStatus.isSelfLocked) {
-                _feedbackMessage.value = "Management controls are locked during active restriction window"
-                return@launch
-            }
             val coordinator = lockCoordinator ?: return@launch
             val result = coordinator.tryRemoveConfig(packageName)
             coordinator.reconcile()
@@ -363,9 +366,18 @@ class MainViewModel(
                     _feedbackMessage.value = "$packageName not found"
                 }
                 is SettingsPolicy.RemoveResult.SelfLocked -> {
-                    _feedbackMessage.value = "Management controls are locked during active restriction window"
+                    _feedbackMessage.value = getString(R.string.self_lock_controls_locked)
                 }
             }
+        }
+    }
+
+    private fun getString(resId: Int, vararg args: Any): String {
+        return context?.getString(resId, *args) ?: when (resId) {
+            R.string.error_daily_limit_range -> "Daily limit must be between 1 and 720 minutes"
+            R.string.error_identical_times -> "Hide time and reveal time cannot be identical"
+            R.string.self_lock_controls_locked -> "Management controls are locked during active restriction window"
+            else -> ""
         }
     }
 
@@ -382,7 +394,9 @@ class MainViewModel(
                 app.appDiscoveryRepository,
                 app.criticalPackageResolver,
                 app.systemStatusChecker,
-                app.timeWindowScheduler
+                app.timeWindowScheduler,
+                kotlinx.coroutines.Dispatchers.IO,
+                app
             ) as T
         }
     }

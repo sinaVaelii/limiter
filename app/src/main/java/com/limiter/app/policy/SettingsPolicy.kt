@@ -13,6 +13,10 @@ import java.time.ZoneId
  */
 object SettingsPolicy {
 
+    const val MAX_DAILY_LIMIT_MINUTES = 720
+    const val MAX_LIMIT_INCREASE_MINUTES = 30
+    const val MIN_DAILY_LIMIT_MINUTES = 1
+
     sealed interface EditResult {
         /** Change was applied immediately. */
         data class Applied(val config: TargetAppConfig) : EditResult
@@ -57,8 +61,9 @@ object SettingsPolicy {
     }
 
     /**
-     * Evaluate adding a new target.
+     * Evaluate adding a new target per Rule A.
      *
+     * Limit must be in 1..720 (MIN_DAILY_LIMIT_MINUTES..MAX_DAILY_LIMIT_MINUTES).
      * Immediate when: valid, not duplicate, not protected.
      */
     fun evaluateAdd(
@@ -67,7 +72,15 @@ object SettingsPolicy {
         protectedPackages: Set<String>
     ): AddResult {
         if (!isValid(config)) {
-            return AddResult.Invalid("Configuration validation failed")
+            return AddResult.Invalid(
+                if (config.dailyLimitMinutes > MAX_DAILY_LIMIT_MINUTES) {
+                    "Daily limit cannot exceed $MAX_DAILY_LIMIT_MINUTES minutes"
+                } else if (config.dailyLimitMinutes < MIN_DAILY_LIMIT_MINUTES) {
+                    "Daily limit must be at least $MIN_DAILY_LIMIT_MINUTES minute"
+                } else {
+                    "Configuration validation failed"
+                }
+            )
         }
         if (config.packageName in currentTargets) {
             return AddResult.Duplicate
@@ -79,10 +92,15 @@ object SettingsPolicy {
     }
 
     /**
-     * Evaluate editing an existing target.
+     * Evaluate editing an existing target per Rule A.
      *
      * - Lower daily limit: apply immediately (tightening).
-     * - Higher daily limit: defer to next day (loosening).
+     * - Increase by d = proposed - currentActiveLimit:
+     *   - If d > 30: rejected with specific error.
+     *   - If proposed > 720: rejected.
+     *   - If 0 < d <= 30: deferred to next day (loosening).
+     *   - Cumulative cap: compares against currently active limit (effectiveActiveLimit),
+     *     never against pending, so queuing cannot exceed +30 total.
      * - Hide/reveal changes: defer by default.
      * - Mixed tightening + loosening: apply tightening now, defer loosening.
      */
@@ -96,13 +114,30 @@ object SettingsPolicy {
             ?: return EditResult.NotFound
 
         if (!isValid(newConfig)) {
-            return EditResult.Invalid("Configuration validation failed")
+            return EditResult.Invalid(
+                if (newConfig.dailyLimitMinutes > MAX_DAILY_LIMIT_MINUTES) {
+                    "Daily limit cannot exceed $MAX_DAILY_LIMIT_MINUTES minutes"
+                } else if (newConfig.dailyLimitMinutes < MIN_DAILY_LIMIT_MINUTES) {
+                    "Daily limit must be at least $MIN_DAILY_LIMIT_MINUTES minute"
+                } else {
+                    "Configuration validation failed"
+                }
+            )
         }
 
+        val effectiveActiveLimit = minOf(existing.dailyLimitMinutes, MAX_DAILY_LIMIT_MINUTES)
         val todayEpochDay = TimeMath.localEpochDay(nowMillis, zone)
         val limitChanged = newConfig.dailyLimitMinutes != existing.dailyLimitMinutes
         val windowChanged = newConfig.hideAtMinuteOfDay != existing.hideAtMinuteOfDay ||
                 newConfig.revealAtMinuteOfDay != existing.revealAtMinuteOfDay
+
+        // Rule A: Check limit increase against currently active limit
+        if (newConfig.dailyLimitMinutes > effectiveActiveLimit) {
+            val increase = newConfig.dailyLimitMinutes - effectiveActiveLimit
+            if (increase > MAX_LIMIT_INCREASE_MINUTES) {
+                return EditResult.Invalid("Daily limit can be increased by at most $MAX_LIMIT_INCREASE_MINUTES minutes per change")
+            }
+        }
 
         // Pure tightening: lower limit, no window change
         if (limitChanged && !windowChanged && newConfig.dailyLimitMinutes < existing.dailyLimitMinutes) {
@@ -195,16 +230,29 @@ object SettingsPolicy {
         }
     }
 
-    private fun isValid(config: TargetAppConfig): Boolean {
+    fun isValid(config: TargetAppConfig): Boolean {
         return try {
-            // TargetAppConfig's init block validates; if it was constructed, it's valid.
-            // But if someone bypasses via copy(), we re-check here.
-            config.dailyLimitMinutes in 1..1440 &&
+            config.dailyLimitMinutes in MIN_DAILY_LIMIT_MINUTES..MAX_DAILY_LIMIT_MINUTES &&
                     config.hideAtMinuteOfDay in 0..1439 &&
                     config.revealAtMinuteOfDay in 0..1439 &&
                     config.hideAtMinuteOfDay != config.revealAtMinuteOfDay
         } catch (_: Exception) {
             false
         }
+    }
+
+    fun windowDurationMinutes(hide: Int, reveal: Int): Int {
+        return if (hide < reveal) {
+            reveal - hide
+        } else {
+            (1440 - hide) + reveal
+        }
+    }
+
+    fun isWindowLoosening(oldHide: Int, oldReveal: Int, newHide: Int, newReveal: Int): Boolean {
+        if (oldHide == newHide && oldReveal == newReveal) return false
+        val oldDuration = windowDurationMinutes(oldHide, oldReveal)
+        val newDuration = windowDurationMinutes(newHide, newReveal)
+        return newDuration < oldDuration
     }
 }

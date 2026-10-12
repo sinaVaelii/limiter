@@ -49,11 +49,12 @@
     <string name="configure_selected">Configure Selected</string>
     <string name="batch_config_title">Configure Selected Apps</string>
     <string name="edit_config_title">Edit Application Config</string>
-    <string name="daily_limit_label">Daily usage limit (minutes, 1–1440)</string>
+    <string name="daily_limit_label">Daily usage limit (minutes, 1–720)</string>
     <string name="hide_time_label">Lock start time (Hide)</string>
     <string name="reveal_time_label">Lock end time (Reveal)</string>
     <string name="apply">Apply</string>
     <string name="cancel">Cancel</string>
+    <string name="confirm">Confirm</string>
     <string name="confirm_remove_title">Remove Application</string>
     <string name="confirm_remove_msg">Are you sure you want to remove %1$s? Loosening or removal changes will take effect tomorrow.</string>
     <string name="locked_readonly_title">Application Locked</string>
@@ -67,6 +68,15 @@
     <string name="pending_applies_epoch_day">Applies on or after epoch day: %1$d</string>
     <string name="edit_current_effective">Currently effective: Limit %1$dm, Window %2$s–%3$s</string>
     <string name="edit_pending_update">Pending update: Limit %1$dm, Window %2$s–%3$s (applies tomorrow)</string>
-    <string name="error_daily_limit_range">Daily limit must be between 1 and 1440 minutes</string>
+    <string name="error_daily_limit_range">Daily limit must be between 1 and 720 minutes</string>
+    <string name="error_daily_limit_max">Daily limit cannot exceed 720 minutes (12 hours)</string>
+    <string name="error_limit_increase_max">Daily limit can be increased by at most 30 minutes per change</string>
     <string name="error_identical_times">Hide time and reveal time cannot be identical</string>
+
+    <!-- P4 Product Rules & Self-Lock -->
+    <string name="picker_already_limited">Already limited</string>
+    <string name="self_lock_add_confirmation">This cannot be undone until the self-lock window ends</string>
+    <string name="self_lock_add_confirmation_title">Add Target During Self-Lock</string>
+    <string name="self_lock_view_dashboard">View Dashboard</string>
+    <string name="self_lock_controls_locked">Management controls are locked during active restriction window</string>
 </resources>

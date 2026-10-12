@@ -113,7 +113,16 @@ class LockCoordinator(
             return ReconcileResult.NotDeviceOwner
         }
 
-        val targets = settingsRepository.snapshotTargets()
+        val rawTargets = settingsRepository.snapshotTargets()
+        val targets = rawTargets.toMutableMap()
+        for ((pkg, config) in rawTargets) {
+            if (config.dailyLimitMinutes > SettingsPolicy.MAX_DAILY_LIMIT_MINUTES) {
+                val clamped = config.copy(dailyLimitMinutes = SettingsPolicy.MAX_DAILY_LIMIT_MINUTES)
+                safeLogE("Clamping target $pkg daily limit from ${config.dailyLimitMinutes} to ${SettingsPolicy.MAX_DAILY_LIMIT_MINUTES} minutes")
+                settingsRepository.putTarget(clamped)
+                targets[pkg] = clamped
+            }
+        }
         val pendingChanges = settingsRepository.snapshotPending()
         val lockRecords = lockStateStore.snapshot().toMutableMap()
         val protectedPkgs = criticalPackageResolver.resolveProtected()
@@ -595,9 +604,7 @@ class LockCoordinator(
 
         // Enforce self-lock: management controls locked during active restriction window
         val selfLock = SelfLockPolicy.calculateSelfLockStatus(targets, now, zone, protectedPkgs)
-        if (selfLock.isSelfLocked) {
-            return@withLock com.limiter.app.policy.SettingsPolicy.EditResult.SelfLocked
-        }
+        val isNewTarget = config.packageName !in targets
 
         // Protected packages cannot be added or edited as targets
         if (config.packageName in protectedPkgs) {
@@ -605,19 +612,37 @@ class LockCoordinator(
         }
         
         // Treat as Add if it doesn't exist
-        if (config.packageName !in targets) {
+        if (isNewTarget) {
+            if (!SelfLockGate.isActionAllowed(SelfLockAction.AddTarget(config.packageName, config), selfLock)) {
+                return@withLock com.limiter.app.policy.SettingsPolicy.EditResult.SelfLocked
+            }
             val addResult = com.limiter.app.policy.SettingsPolicy.evaluateAdd(config, targets, protectedPkgs)
             if (addResult is com.limiter.app.policy.SettingsPolicy.AddResult.Ok) {
                 settingsRepository.putTarget(addResult.config)
                 return@withLock com.limiter.app.policy.SettingsPolicy.EditResult.Applied(addResult.config)
             } else if (addResult is com.limiter.app.policy.SettingsPolicy.AddResult.Protected) {
                 return@withLock com.limiter.app.policy.SettingsPolicy.EditResult.Protected
+            } else if (addResult is com.limiter.app.policy.SettingsPolicy.AddResult.Duplicate) {
+                return@withLock com.limiter.app.policy.SettingsPolicy.EditResult.Duplicate
+            } else if (addResult is com.limiter.app.policy.SettingsPolicy.AddResult.SelfLocked) {
+                return@withLock com.limiter.app.policy.SettingsPolicy.EditResult.SelfLocked
+            } else if (addResult is com.limiter.app.policy.SettingsPolicy.AddResult.Invalid) {
+                return@withLock com.limiter.app.policy.SettingsPolicy.EditResult.Invalid(addResult.reason)
             } else {
                 return@withLock com.limiter.app.policy.SettingsPolicy.EditResult.Invalid("Add failed: $addResult")
             }
         }
-        
+
+        val existing = targets[config.packageName] ?: return@withLock com.limiter.app.policy.SettingsPolicy.EditResult.NotFound
+
+        // Enforce self-lock: blocks loosening (limit increase, window loosening), allows tightening (e.g. limit decrease)
+        val editAction = SelfLockAction.EditTarget(config.packageName, existing, config)
+        if (!SelfLockGate.isActionAllowed(editAction, selfLock)) {
+            return@withLock com.limiter.app.policy.SettingsPolicy.EditResult.SelfLocked
+        }
+
         val editResult = com.limiter.app.policy.SettingsPolicy.evaluateEdit(config, targets, now, zone)
+
         when (editResult) {
             is com.limiter.app.policy.SettingsPolicy.EditResult.Applied -> {
                 settingsRepository.putTarget(editResult.config)
@@ -646,9 +671,9 @@ class LockCoordinator(
         val targets = settingsRepository.snapshotTargets()
         val protectedPkgs = criticalPackageResolver.resolveProtected()
 
-        // Enforce self-lock: management controls locked during active restriction window
+        // Enforce self-lock: removing a target is loosening and strictly blocked during self-lock
         val selfLock = SelfLockPolicy.calculateSelfLockStatus(targets, now, zone, protectedPkgs)
-        if (selfLock.isSelfLocked) {
+        if (!SelfLockGate.isActionAllowed(SelfLockAction.RemoveTarget(packageName), selfLock)) {
             return@withLock com.limiter.app.policy.SettingsPolicy.RemoveResult.SelfLocked
         }
         

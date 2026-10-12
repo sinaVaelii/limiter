@@ -79,7 +79,7 @@ class SettingsPolicyTest {
     @Test
     fun `edit - higher daily limit is deferred (loosening)`() {
         val existing = mapOf(sampleConfig.packageName to sampleConfig)
-        val looser = sampleConfig.copy(dailyLimitMinutes = 120)
+        val looser = sampleConfig.copy(dailyLimitMinutes = 90)
         val nowMillis = zdtToMillis(2024, 6, 15, 12, 0)
         val result = SettingsPolicy.evaluateEdit(
             newConfig = looser,

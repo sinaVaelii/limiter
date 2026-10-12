@@ -149,14 +149,15 @@ class UsageMonitorService : LifecycleService() {
 
                 for ((pkg, config) in targets) {
                     val usedMillis = usageMap[pkg] ?: 0L
-                    val limitMillis = config.dailyLimitMinutes * 60_000L
+                    val effectiveDailyLimitMinutes = minOf(config.dailyLimitMinutes, com.limiter.app.policy.SettingsPolicy.MAX_DAILY_LIMIT_MINUTES)
+                    val limitMillis = effectiveDailyLimitMinutes * 60_000L
                     val remainingMillis = (limitMillis - usedMillis).coerceAtLeast(0)
 
                     val snapshot = UsageSnapshot.Available(
                         packageName = pkg,
                         usedMillis = usedMillis,
                         remainingMillis = remainingMillis,
-                        limitMinutes = config.dailyLimitMinutes
+                        limitMinutes = effectiveDailyLimitMinutes
                     )
                     allSnapshots[pkg] = snapshot
 
