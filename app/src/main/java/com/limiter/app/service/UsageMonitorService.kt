@@ -52,6 +52,8 @@ class UsageMonitorService : LifecycleService() {
             try {
                 val intent = Intent(context, UsageMonitorService::class.java)
                 context.startForegroundService(intent)
+            } catch (e: android.app.ForegroundServiceStartNotAllowedException) {
+                android.util.Log.e("Limiter", "Foreground service start not allowed in UsageMonitorService.start", e)
             } catch (e: Exception) {
                 android.util.Log.e("Limiter", "Failed to start UsageMonitorService", e)
             }

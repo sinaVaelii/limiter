@@ -1,13 +1,13 @@
 # Limiter State Tracker
 
-- **Current Phase:** P0 completed | **Commit:** `4130016`
+- **Current Phase:** P1 completed | **Commit:** `459101c`
 - **Decisions:**
   - D1: Baseline `compileSdk=targetSdk=minSdk=34`; test device runs Android 15 (API 35).
   - D2: `UsageMonitorService` may invoke `LockCoordinator.reconcile()` when lock/retry is due.
   - D3: `SCHEDULE_EXACT_ALARM` appops permission authorized for granting in P2.
   - D4: Clock tampering (H7) options documented in triage; no code changes.
   - D5: Max daily limit 720m, max raise +30m, self-lock allows viewing & adding targets.
-- **Phases Completed:** P0 (Triage).
+- **Phases Completed:** P0 (Triage), P1 (Entry Points Robustness: H1, H5, H6).
 - **Open Issues:**
   - H2: `SelfLockScreen` uses `System.currentTimeMillis()`; dashboard timer missing.
   - H4: `TimeWindowScheduler` does not cancel alarms for removed targets.
@@ -21,7 +21,7 @@
   - B5: Stale Stage 1 comment in `device_admin.xml`.
   - B6: Dead `Build.VERSION.SDK_INT >= Build.VERSION_CODES.S` check in `Theme.kt`.
   - D1: README test count & documentation divergence.
-  - T1: Missing unit tests for service loop and receiver completion.
+  - T1: Missing unit tests for service loop and receiver completion (partially addressed in P1).
 - **Phone Status (Xiaomi Redmi 12 - `4a952d897d79`):**
   - Device Owner: Active (`com.limiter.app/.admin.LimiterAdminReceiver`).
   - FGS: Active (`UsageMonitorService`, `systemExempted` type `0x400`).

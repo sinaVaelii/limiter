@@ -132,7 +132,13 @@ class LimiterApp : Application() {
             if (isDeviceOwner()) {
                 lockCoordinator?.reconcile()
                 timeWindowScheduler?.reschedule()
-                com.limiter.app.service.UsageMonitorService.start(this@LimiterApp)
+                try {
+                    com.limiter.app.service.UsageMonitorService.start(this@LimiterApp)
+                } catch (e: android.app.ForegroundServiceStartNotAllowedException) {
+                    android.util.Log.e("Limiter", "Foreground service start not allowed in LimiterApp.onCreate", e)
+                } catch (e: Exception) {
+                    android.util.Log.e("Limiter", "Failed to start UsageMonitorService in LimiterApp.onCreate", e)
+                }
             }
         }
     }

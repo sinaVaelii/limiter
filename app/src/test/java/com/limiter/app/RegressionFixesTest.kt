@@ -1650,4 +1650,177 @@ class RegressionFixesTest {
         )
         assertTrue(UsageMonitorWatchdog.isAnyLockOrRetryDue(pendingNoRetry, now))
     }
+
+    // =========================================================================
+    // 19. Entry Points Security & Robustness Tests (P1: H1, H5, H6)
+    // =========================================================================
+
+    @Test
+    fun alarmReceiver_processAlarm_callsFinishOnceOnSuccess() = runTest(testDispatcher) {
+        val finishCount = java.util.concurrent.atomic.AtomicInteger(0)
+        val job = AlarmReceiver.processAlarm(
+            context = null,
+            intent = Intent(TimeWindowScheduler.ACTION_UNLOCK),
+            coordinator = coordinator,
+            scheduler = scheduler,
+            isDeviceOwner = true,
+            scope = this,
+            onFinish = { finishCount.incrementAndGet() }
+        )
+        job.join()
+        assertEquals(1, finishCount.get())
+    }
+
+    private class InterceptingLockStateStore(
+        private val delegate: InMemoryLockStateStore = InMemoryLockStateStore(),
+        private val snapshotInterceptor: (suspend () -> Map<String, LockRecord>)? = null
+    ) : com.limiter.app.data.LockStateStore by delegate {
+        override suspend fun snapshot(): Map<String, LockRecord> {
+            return snapshotInterceptor?.invoke() ?: delegate.snapshot()
+        }
+    }
+
+    @Test
+    fun alarmReceiver_processAlarm_callsFinishOnceOnException() = runTest(testDispatcher) {
+        val failingStore = InterceptingLockStateStore(
+            snapshotInterceptor = { throw RuntimeException("Simulated crash during snapshot") }
+        )
+        val failingCoordinator = LockCoordinator(
+            gateway = gateway,
+            freezer = freezer,
+            lockStateStore = failingStore,
+            settingsRepository = settingsRepository,
+            criticalPackageResolver = resolver,
+            timeSource = timeSource
+        )
+        val finishCount = java.util.concurrent.atomic.AtomicInteger(0)
+        val job = AlarmReceiver.processAlarm(
+            context = null,
+            intent = Intent(TimeWindowScheduler.ACTION_UNLOCK),
+            coordinator = failingCoordinator,
+            scheduler = scheduler,
+            isDeviceOwner = true,
+            scope = this,
+            onFinish = { finishCount.incrementAndGet() }
+        )
+        job.join()
+        assertEquals(1, finishCount.get())
+    }
+
+    @Test
+    fun alarmReceiver_processAlarm_callsFinishOnceOnTimeout() = runTest(testDispatcher) {
+        val slowStore = InterceptingLockStateStore(
+            snapshotInterceptor = {
+                delay(2000L)
+                emptyMap()
+            }
+        )
+        val slowCoordinator = LockCoordinator(
+            gateway = gateway,
+            freezer = freezer,
+            lockStateStore = slowStore,
+            settingsRepository = settingsRepository,
+            criticalPackageResolver = resolver,
+            timeSource = timeSource
+        )
+        val finishCount = java.util.concurrent.atomic.AtomicInteger(0)
+        val job = AlarmReceiver.processAlarm(
+            context = null,
+            intent = Intent(TimeWindowScheduler.ACTION_UNLOCK),
+            coordinator = slowCoordinator,
+            scheduler = scheduler,
+            isDeviceOwner = true,
+            scope = this,
+            onFinish = { finishCount.incrementAndGet() },
+            timeoutMillis = 50L
+        )
+        job.join()
+        assertEquals(1, finishCount.get())
+    }
+
+    @Test
+    fun systemEventsReceiver_processEvent_callsFinishOnceOnSuccess() = runTest(testDispatcher) {
+        val finishCount = java.util.concurrent.atomic.AtomicInteger(0)
+        val job = com.limiter.app.scheduler.SystemEventsReceiver.processEvent(
+            context = null,
+            intent = Intent(Intent.ACTION_BOOT_COMPLETED),
+            coordinator = coordinator,
+            scheduler = scheduler,
+            isDeviceOwner = true,
+            scope = this,
+            onFinish = { finishCount.incrementAndGet() }
+        )
+        job.join()
+        assertEquals(1, finishCount.get())
+    }
+
+    @Test
+    fun systemEventsReceiver_processEvent_callsFinishOnceOnException() = runTest(testDispatcher) {
+        val failingStore = InterceptingLockStateStore(
+            snapshotInterceptor = { throw RuntimeException("Simulated crash during snapshot") }
+        )
+        val failingCoordinator = LockCoordinator(
+            gateway = gateway,
+            freezer = freezer,
+            lockStateStore = failingStore,
+            settingsRepository = settingsRepository,
+            criticalPackageResolver = resolver,
+            timeSource = timeSource
+        )
+        val finishCount = java.util.concurrent.atomic.AtomicInteger(0)
+        val job = com.limiter.app.scheduler.SystemEventsReceiver.processEvent(
+            context = null,
+            intent = Intent(Intent.ACTION_BOOT_COMPLETED),
+            coordinator = failingCoordinator,
+            scheduler = scheduler,
+            isDeviceOwner = true,
+            scope = this,
+            onFinish = { finishCount.incrementAndGet() }
+        )
+        job.join()
+        assertEquals(1, finishCount.get())
+    }
+
+    @Test
+    fun systemEventsReceiver_processEvent_callsFinishOnceOnTimeout() = runTest(testDispatcher) {
+        val slowStore = InterceptingLockStateStore(
+            snapshotInterceptor = {
+                delay(2000L)
+                emptyMap()
+            }
+        )
+        val slowCoordinator = LockCoordinator(
+            gateway = gateway,
+            freezer = freezer,
+            lockStateStore = slowStore,
+            settingsRepository = settingsRepository,
+            criticalPackageResolver = resolver,
+            timeSource = timeSource
+        )
+        val finishCount = java.util.concurrent.atomic.AtomicInteger(0)
+        val job = com.limiter.app.scheduler.SystemEventsReceiver.processEvent(
+            context = null,
+            intent = Intent(Intent.ACTION_BOOT_COMPLETED),
+            coordinator = slowCoordinator,
+            scheduler = scheduler,
+            isDeviceOwner = true,
+            scope = this,
+            onFinish = { finishCount.incrementAndGet() },
+            timeoutMillis = 50L
+        )
+        job.join()
+        assertEquals(1, finishCount.get())
+    }
+
+    @Test
+    fun usageMonitorService_calculateLoopBackoff_scalesAndClampsProperly() {
+        assertEquals(0L, UsageMonitorService.calculateLoopBackoff(0))
+        assertEquals(0L, UsageMonitorService.calculateLoopBackoff(-1))
+        assertEquals(5_000L, UsageMonitorService.calculateLoopBackoff(1))
+        assertEquals(10_000L, UsageMonitorService.calculateLoopBackoff(2))
+        assertEquals(30_000L, UsageMonitorService.calculateLoopBackoff(3))
+        assertEquals(60_000L, UsageMonitorService.calculateLoopBackoff(4))
+        assertEquals(60_000L, UsageMonitorService.calculateLoopBackoff(10))
+    }
 }
+

@@ -46,7 +46,9 @@ class AlarmReceiver : BroadcastReceiver() {
             scheduler: TimeWindowScheduler?,
             isDeviceOwner: Boolean,
             scope: CoroutineScope,
-            pendingResult: PendingResult? = null
+            pendingResult: PendingResult? = null,
+            onFinish: (() -> Unit)? = null,
+            timeoutMillis: Long = 8_000L
         ): Job {
             val finished = AtomicBoolean(false)
             fun safeLogW(msg: String, tr: Throwable? = null) {
@@ -67,23 +69,37 @@ class AlarmReceiver : BroadcastReceiver() {
                     } catch (t: Throwable) {
                         safeLogW("Error finishing pending result in AlarmReceiver", t)
                     }
+                    try {
+                        onFinish?.invoke()
+                    } catch (t: Throwable) {
+                        safeLogW("Error invoking onFinish in AlarmReceiver", t)
+                    }
                 }
             }
 
+            val action = try { intent.action } catch (_: Throwable) { null }
             return try {
                 val job = scope.launch {
                     try {
-                        coordinator.reconcile()
-                        scheduler?.reschedule()
-                        if (isDeviceOwner && context != null) {
-                            try {
-                                com.limiter.app.service.UsageMonitorService.start(context)
-                            } catch (e: Exception) {
-                                safeLogW("Could not start UsageMonitorService from AlarmReceiver", e)
+                        kotlinx.coroutines.withTimeout(timeoutMillis) {
+                            coordinator.reconcile()
+                            scheduler?.reschedule()
+                            if (isDeviceOwner && context != null) {
+                                try {
+                                    com.limiter.app.service.UsageMonitorService.start(context)
+                                } catch (e: android.app.ForegroundServiceStartNotAllowedException) {
+                                    safeLogE("Foreground service start not allowed in AlarmReceiver", e)
+                                } catch (e: Exception) {
+                                    safeLogW("Could not start UsageMonitorService from AlarmReceiver", e)
+                                }
                             }
                         }
+                    } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+                        safeLogE("Timeout (${timeoutMillis}ms) processing alarm broadcast: ${action ?: "unknown"}", e)
                     } catch (t: Throwable) {
-                        safeLogE("Error processing alarm broadcast: ${intent.action}", t)
+                        safeLogE("Error processing alarm broadcast: ${action ?: "unknown"}", t)
+                    } finally {
+                        finishOnce()
                     }
                 }
                 job.invokeOnCompletion { finishOnce() }

@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
-import com.limiter.app.model.TargetAppConfig
 import com.limiter.app.ui.LimiterScreen
 import com.limiter.app.ui.MainViewModel
 import com.limiter.app.ui.theme.LimiterTheme
@@ -141,7 +140,13 @@ class MainActivity : ComponentActivity() {
         super.onStart()
         val app = application as LimiterApp
         if (app.isDeviceOwner()) {
-            com.limiter.app.service.UsageMonitorService.start(this)
+            try {
+                com.limiter.app.service.UsageMonitorService.start(this)
+            } catch (e: android.app.ForegroundServiceStartNotAllowedException) {
+                android.util.Log.e("Limiter", "Foreground service start not allowed in MainActivity.onStart", e)
+            } catch (e: Exception) {
+                android.util.Log.e("Limiter", "Failed to start UsageMonitorService in MainActivity.onStart", e)
+            }
         }
     }
 }

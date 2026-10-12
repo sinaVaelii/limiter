@@ -26,7 +26,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 class SystemEventsReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
-        val app = context.applicationContext as LimiterApp
+        val app = context.applicationContext as? LimiterApp ?: return
         val coordinator = app.lockCoordinator ?: return
 
         when (intent.action) {
@@ -34,43 +34,97 @@ class SystemEventsReceiver : BroadcastReceiver() {
             Intent.ACTION_MY_PACKAGE_REPLACED,
             Intent.ACTION_TIME_CHANGED,
             Intent.ACTION_TIMEZONE_CHANGED -> {
-                val pendingResult = goAsync()
-                val finished = AtomicBoolean(false)
-                fun finishOnce() {
-                    if (finished.compareAndSet(false, true)) {
-                        try {
-                            pendingResult.finish()
-                        } catch (t: Throwable) {
-                            android.util.Log.w("Limiter", "Error finishing pending result in SystemEventsReceiver", t)
-                        }
+                processEvent(
+                    context = context,
+                    intent = intent,
+                    coordinator = coordinator,
+                    scheduler = app.timeWindowScheduler,
+                    isDeviceOwner = app.isDeviceOwner(),
+                    scope = app.applicationScope,
+                    pendingResult = goAsync()
+                )
+            }
+        }
+    }
+
+    companion object {
+        fun processEvent(
+            context: Context? = null,
+            intent: Intent,
+            coordinator: com.limiter.app.policy.LockCoordinator,
+            scheduler: TimeWindowScheduler?,
+            isDeviceOwner: Boolean,
+            scope: kotlinx.coroutines.CoroutineScope,
+            pendingResult: PendingResult? = null,
+            onFinish: (() -> Unit)? = null,
+            timeoutMillis: Long = 8_000L
+        ): kotlinx.coroutines.Job {
+            val finished = AtomicBoolean(false)
+            fun safeLogW(msg: String, tr: Throwable? = null) {
+                try {
+                    if (tr != null) android.util.Log.w("Limiter", msg, tr) else android.util.Log.w("Limiter", msg)
+                } catch (_: Throwable) {}
+            }
+            fun safeLogE(msg: String, tr: Throwable? = null) {
+                try {
+                    if (tr != null) android.util.Log.e("Limiter", msg, tr) else android.util.Log.e("Limiter", msg)
+                } catch (_: Throwable) {}
+            }
+
+            fun finishOnce() {
+                if (finished.compareAndSet(false, true)) {
+                    try {
+                        pendingResult?.finish()
+                    } catch (t: Throwable) {
+                        safeLogW("Error finishing pending result in SystemEventsReceiver", t)
+                    }
+                    try {
+                        onFinish?.invoke()
+                    } catch (t: Throwable) {
+                        safeLogW("Error invoking onFinish in SystemEventsReceiver", t)
                     }
                 }
+            }
 
-                try {
-                    val job = app.applicationScope.launch {
-                        try {
+            val action = try { intent.action } catch (_: Throwable) { null }
+            return try {
+                val job = scope.launch {
+                    try {
+                        kotlinx.coroutines.withTimeout(timeoutMillis) {
                             // After app update, clear and rebuild alarms
-                            if (intent.action == Intent.ACTION_MY_PACKAGE_REPLACED) {
-                                app.timeWindowScheduler?.cancelAll()
+                            if (action == Intent.ACTION_MY_PACKAGE_REPLACED) {
+                                scheduler?.cancelAll()
                             }
 
                             // Reconcile and reschedule
                             coordinator.reconcile()
-                            app.timeWindowScheduler?.reschedule()
+                            scheduler?.reschedule()
 
                             // Ensure monitoring where allowed per AGENTS.md §43
-                            if (app.isDeviceOwner()) {
-                                com.limiter.app.service.UsageMonitorService.start(context)
+                            if (isDeviceOwner && context != null) {
+                                try {
+                                    com.limiter.app.service.UsageMonitorService.start(context)
+                                } catch (e: android.app.ForegroundServiceStartNotAllowedException) {
+                                    safeLogE("Foreground service start not allowed in SystemEventsReceiver", e)
+                                } catch (e: Exception) {
+                                    safeLogW("Could not start UsageMonitorService from SystemEventsReceiver", e)
+                                }
                             }
-                        } catch (t: Throwable) {
-                            android.util.Log.e("Limiter", "Error processing system event: ${intent.action}", t)
                         }
+                    } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+                        safeLogE("Timeout (${timeoutMillis}ms) processing system broadcast: ${action ?: "unknown"}", e)
+                    } catch (t: Throwable) {
+                        safeLogE("Error processing system broadcast: ${action ?: "unknown"}", t)
+                    } finally {
+                        finishOnce()
                     }
-                    job.invokeOnCompletion { finishOnce() }
-                } catch (t: Throwable) {
-                    android.util.Log.e("Limiter", "Failed to schedule coroutine in SystemEventsReceiver", t)
-                    finishOnce()
                 }
+                job.invokeOnCompletion { finishOnce() }
+                job
+            } catch (t: Throwable) {
+                safeLogE("Failed to schedule coroutine in SystemEventsReceiver", t)
+                finishOnce()
+                throw t
             }
         }
     }
