@@ -57,6 +57,23 @@ class UsageStatsReader(
     }
 
     /**
+     * Read usage events once for all specified packages and calculate foreground millis.
+     * Avoids querying the 48-hour event window multiple times on each monitor tick.
+     */
+    fun readTodayUsageMillisBatch(packageNames: Set<String>): Map<String, Long> {
+        if (packageNames.isEmpty()) return emptyMap()
+        val nowMillis = timeSource.nowMillis()
+        val zone = timeSource.zone()
+        val midnightMillis = TimeMath.localMidnightMillis(nowMillis, zone)
+        val queryStart = midnightMillis - LOOKBACK_MILLIS
+
+        val events = queryEvents(queryStart, nowMillis)
+        return packageNames.associateWith { pkg ->
+            UsageCalculator.foregroundMillis(events, pkg, midnightMillis, nowMillis)
+        }
+    }
+
+    /**
      * Query raw usage events between [beginMillis] and [endMillis],
      * mapped to [UsageEventRecord].
      */
@@ -95,20 +112,11 @@ class UsageStatsReader(
     fun hasUsageAccess(): Boolean {
         val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as? android.app.AppOpsManager
             ?: return false
-        val mode = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-            appOps.unsafeCheckOpNoThrow(
-                android.app.AppOpsManager.OPSTR_GET_USAGE_STATS,
-                android.os.Process.myUid(),
-                context.packageName
-            )
-        } else {
-            @Suppress("DEPRECATION")
-            appOps.checkOpNoThrow(
-                android.app.AppOpsManager.OPSTR_GET_USAGE_STATS,
-                android.os.Process.myUid(),
-                context.packageName
-            )
-        }
+        val mode = appOps.unsafeCheckOpNoThrow(
+            android.app.AppOpsManager.OPSTR_GET_USAGE_STATS,
+            android.os.Process.myUid(),
+            context.packageName
+        )
         return mode == android.app.AppOpsManager.MODE_ALLOWED
     }
 

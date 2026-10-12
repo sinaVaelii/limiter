@@ -92,7 +92,7 @@ adb shell pm unsuspend com.example.target
 ## بیلد / Build
 
 ```bash
-# تست‌ها — ۱۶۴ تست، ۰ خطا / Tests — 164 tests, 0 failures
+# تست‌ها — ۱۹۹ تست، ۰ خطا / Tests — 199 tests, 0 failures
 ./gradlew testDebugUnitTest --offline
 
 # بیلد debug

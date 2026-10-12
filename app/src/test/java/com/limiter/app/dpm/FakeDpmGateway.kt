@@ -102,8 +102,19 @@ class FakeDpmGateway : DpmGateway {
         return if (deviceOwner) disabledUserControlPackages else emptyList()
     }
 
+    val packageInstallStatusMap: MutableMap<String, PackageInstallStatus> = mutableMapOf()
+
+    override fun getPackageInstallStatus(pkg: String): PackageInstallStatus {
+        packageInstallStatusMap[pkg]?.let { return it }
+        return if (pkg in installedPackages) {
+            PackageInstallStatus.Installed
+        } else {
+            PackageInstallStatus.NotInstalled
+        }
+    }
+
     override fun isPackageInstalled(pkg: String): Boolean {
-        return pkg in installedPackages
+        return getPackageInstallStatus(pkg) is PackageInstallStatus.Installed
     }
 
     override fun getAllFrozenPackages(): List<String> {

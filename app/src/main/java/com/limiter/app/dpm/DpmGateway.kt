@@ -37,7 +37,13 @@ interface DpmGateway {
     fun getUserControlDisabledPackages(): List<String>
 
     /**
-     * Check if a package is installed on the device.
+     * Get package installation status with reliable distinction between
+     * confirmed installed, confirmed not installed, and unknown (transient/error).
+     */
+    fun getPackageInstallStatus(pkg: String): PackageInstallStatus
+
+    /**
+     * Check if a package is confirmed installed on the device.
      */
     fun isPackageInstalled(pkg: String): Boolean
 

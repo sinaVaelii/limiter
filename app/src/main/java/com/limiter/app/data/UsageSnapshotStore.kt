@@ -54,18 +54,27 @@ class UsageSnapshotStore(
         }
     }
 
-    private fun decodeSnapshots(raw: String): Map<String, UsageSnapshot.Available> {
+    internal fun decodeSnapshots(raw: String): Map<String, UsageSnapshot.Available> {
         if (raw.isBlank()) return emptyMap()
-        return raw.lines().filter { it.isNotBlank() }.associate { line ->
-            val parts = line.split("|")
-            require(parts.size == 4) { "Invalid snapshot line: $line" }
-            val snapshot = UsageSnapshot.Available(
-                packageName = parts[0],
-                usedMillis = parts[1].toLong(),
-                remainingMillis = parts[2].toLong(),
-                limitMinutes = parts[3].toInt()
-            )
-            snapshot.packageName to snapshot
-        }
+        return raw.lines().filter { it.isNotBlank() }.mapNotNull { line ->
+            try {
+                val parts = line.split("|")
+                if (parts.size != 4) return@mapNotNull null
+                val pkg = parts[0].trim()
+                if (pkg.isBlank()) return@mapNotNull null
+                val used = parts[1].toLong()
+                val remaining = parts[2].toLong()
+                val limit = parts[3].toInt()
+                val snapshot = UsageSnapshot.Available(
+                    packageName = pkg,
+                    usedMillis = used,
+                    remainingMillis = remaining,
+                    limitMinutes = limit
+                )
+                pkg to snapshot
+            } catch (_: Exception) {
+                null
+            }
+        }.toMap()
     }
 }

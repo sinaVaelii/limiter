@@ -139,7 +139,14 @@ class DataStoreLockStateStore(
         dataStore.edit { prefs ->
             val current = LockRecordCodec.decode(prefs[LockStateKeys.LOCK_RECORDS] ?: "")
                 .toMutableMap()
-            val existing = current[pkg] ?: return@edit
+            val existing = current[pkg] ?: LockRecord(
+                state = LockState.ReleasePending(
+                    requestedAtMillis = now,
+                    visibilityRestored = visibilityRestored,
+                    unsuspensionRestored = unsuspensionRestored
+                ),
+                unlockFailureCount = 0
+            )
 
             val newCount = existing.unlockFailureCount + 1
             val backoffIndex = (newCount - 1).coerceIn(0, RETRY_BACKOFF_MILLIS.size - 1)

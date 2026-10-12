@@ -53,8 +53,7 @@ This path depends on the debug manifest declaring `android:testOnly="true"`. Do 
 
 - Application ID and namespace: `com.limiter.app`.
 - Device Owner component: `com.limiter.app/.admin.LimiterAdminReceiver`.
-- Determine `DEVICE_API_LEVEL` on the actual phone with `adb shell getprop ro.build.version.sdk`; `minSdk` equals that returned value.
-- Keep `compileSdk = 34` and `targetSdk = 34` unless the human explicitly approves a change.
+- SDK baseline approved by human (2026-10-12): `compileSdk = 34`, `targetSdk = 34`, and `minSdk = 34` across the repository.
 - Expected baseline: JDK 17, Gradle 8.7, AGP 8.5.2, Kotlin 1.9.24, Compose BOM 2024.06.00, Compose compiler 1.5.14, Java/Kotlin target 17. Do not add a version catalog.
 - Preserve existing architecture and public contracts unless current evidence proves a defect. In particular, do not casually rewrite `DpmGateway`/`DeviceDpmGateway`, `LockCoordinator`, `UsageStatsReader`, `UsageCalculator`, `UsageMonitorService`, `SettingsPolicy`, time abstractions, or persistence models.
 - Verify Android APIs against local SDK stubs and the actual `DEVICE_API_LEVEL`; never guess framework API availability.

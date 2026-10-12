@@ -158,7 +158,8 @@ class MainViewModelR4Test {
             lockCoordinator = coordinator,
             appDiscoveryRepository = discoveryRepo,
             criticalPackageResolver = resolver,
-            systemStatusChecker = statusChecker
+            systemStatusChecker = statusChecker,
+            ioDispatcher = testDispatcher
         )
     }
 

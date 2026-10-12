@@ -15,7 +15,7 @@ Limiter is a personal-use, offline-only Android application designed for a perso
 2. **Self-Lock Restricted Mode (R4):**
    - When at least one configured application enters its scheduled lock window (e.g. 23:00 to 07:00), Limiter transitions into a dedicated full-screen Self-Lock screen.
    - The screen features a live countdown timer (`HH:mm:ss`), exact expected unlock timestamp in local date/time, and clear notification of ongoing enforcement.
-   - All management controls (app picker, batch config, editing dialogs, target removal) are restricted and rejected by the ViewModel.
+   - All management controls (app picker, batch config, editing dialogs, target removal) are restricted and rejected at the authoritative mutation boundary (`LockCoordinator.tryEditConfig` and `tryRemoveConfig`) as well as in the UI layer.
    - When the scheduled window expires, Limiter automatically returns to the normal management dashboard.
    - Daily usage limit crossings alone do **not** trigger the global self-lock; their locked state is displayed on their individual target card.
 
@@ -90,7 +90,7 @@ The project maintains comprehensive pure-JVM test suites with fakes:
   ```bash
   ./gradlew testDebugUnitTest --offline
   ```
-  Result: 164 unit tests across 13 test suites (0 failures, 0 skipped).
+  Result: 199 unit tests across 14 test suites (0 failures, 0 skipped).
 - **Debug build:**
   ```bash
   ./gradlew assembleDebug --offline

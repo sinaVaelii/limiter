@@ -70,7 +70,7 @@ class DeviceDpmGateway(
                 arrayOf(pkg),
                 true
             )
-            if (failedPackages != null && pkg in failedPackages) {
+            if (pkg in failedPackages) {
                 DpmOperationResult.Failed("Package $pkg appeared in failed-package array after suspend")
             } else {
                 // Verify suspended state
@@ -94,7 +94,7 @@ class DeviceDpmGateway(
                 arrayOf(pkg),
                 false
             )
-            if (failedPackages != null && pkg in failedPackages) {
+            if (pkg in failedPackages) {
                 DpmOperationResult.Failed("Package $pkg appeared in failed-package array after unsuspend")
             } else {
                 // Verify unsuspended
@@ -183,58 +183,113 @@ class DeviceDpmGateway(
         }
     }
 
-    override fun isPackageInstalled(pkg: String): Boolean {
-        // 1. Direct package manager lookup with MATCH_UNINSTALLED_PACKAGES
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                context.packageManager.getPackageInfo(
-                    pkg,
-                    PackageManager.PackageInfoFlags.of(PackageManager.MATCH_UNINSTALLED_PACKAGES.toLong())
-                )
-            } else {
-                @Suppress("DEPRECATION")
-                context.packageManager.getPackageInfo(pkg, PackageManager.MATCH_UNINSTALLED_PACKAGES)
-            }
-            return true
-        } catch (_: PackageManager.NameNotFoundException) {
-            // Fall through to DPM check below
-        } catch (_: Exception) {
-            // Any other exception (e.g. system service temporary failure) is ambiguous
-            // and must NOT be treated as definitive evidence of uninstallation.
-            return true
+    override fun getPackageInstallStatus(pkg: String): PackageInstallStatus {
+        var pmException: Exception? = null
+        val packageInfo = try {
+            context.packageManager.getPackageInfo(
+                pkg,
+                PackageManager.PackageInfoFlags.of(PackageManager.MATCH_UNINSTALLED_PACKAGES.toLong())
+            )
+        } catch (e: Exception) {
+            pmException = e
+            null
         }
 
-        // 2. Fallback to DPM: If Device Owner is active, check if DPM still manages/sees this package.
-        // When an app is hidden or suspended by Device Owner, it is physically installed
-        // even if local PackageManager visibility rules hide it.
-        if (isDeviceOwner()) {
-            try {
-                val hidden = isApplicationHidden(pkg).getOrNull() == true
-                val suspended = isPackageSuspended(pkg).getOrNull() == true
-                if (hidden || suspended) {
-                    return true
+        return evaluateStatus(
+            packageInfo = packageInfo,
+            pmException = pmException,
+            isDeviceOwner = isDeviceOwner(),
+            isApplicationHidden = { isApplicationHidden(pkg) },
+            isPackageSuspended = { isPackageSuspended(pkg) }
+        )
+    }
+
+    companion object {
+        /**
+         * Pure function for evaluating installation status from PackageManager and DPM results.
+         * Separated to enable exhaustive isolated JVM unit testing across all representable states.
+         */
+        fun evaluateStatus(
+            packageInfo: android.content.pm.PackageInfo?,
+            pmException: Exception?,
+            isDeviceOwner: Boolean,
+            isApplicationHidden: () -> Result<Boolean>,
+            isPackageSuspended: () -> Result<Boolean>
+        ): PackageInstallStatus {
+            if (pmException != null) {
+                if (pmException is PackageManager.NameNotFoundException) {
+                    if (!isDeviceOwner) {
+                        return PackageInstallStatus.Unknown("Package visibility limitation: not Device Owner and package not visible via queries")
+                    }
+                    val hiddenRes = isApplicationHidden()
+                    val suspendedRes = isPackageSuspended()
+                    return if (hiddenRes.getOrNull() == true || suspendedRes.getOrNull() == true) {
+                        // Package existence is NOT independently established by PackageManager.
+                        // DPM reporting hidden/suspended when PM threw NameNotFoundException is ambiguous/contradictory.
+                        // Never classify as Installed solely because isApplicationHidden() returns true!
+                        PackageInstallStatus.Unknown("Ambiguous: PM threw NameNotFoundException but DPM reported restricted; package existence not independently established")
+                    } else if (hiddenRes.isSuccess && suspendedRes.isSuccess) {
+                        PackageInstallStatus.NotInstalled
+                    } else {
+                        PackageInstallStatus.Unknown("DPM verification inconclusive: hidden=$hiddenRes, suspended=$suspendedRes")
+                    }
+                } else if (pmException is SecurityException) {
+                    return PackageInstallStatus.Unknown("PackageManager lookup rejected with SecurityException: ${pmException.message}", pmException)
+                } else {
+                    return PackageInstallStatus.Unknown("PackageManager lookup failed: ${pmException.message}", pmException)
                 }
-            } catch (_: Exception) {
-                // Ambiguous result, preserve safe non-removal
-                return true
             }
-        }
 
-        return false
+            if (packageInfo == null) {
+                return PackageInstallStatus.Unknown("PackageInfo is null")
+            }
+
+            val appInfo = packageInfo.applicationInfo
+                ?: return PackageInstallStatus.Unknown("PackageInfo returned null applicationInfo for ${packageInfo.packageName}")
+
+            // If the package is data-only (APK code was removed, leaving only data), it is NOT installed.
+            val isDataOnly = (appInfo.flags and android.content.pm.ApplicationInfo.FLAG_IS_DATA_ONLY) != 0
+            if (isDataOnly) {
+                return PackageInstallStatus.NotInstalled
+            }
+
+            val isInstalledForUser = (appInfo.flags and android.content.pm.ApplicationInfo.FLAG_INSTALLED) != 0
+            if (isInstalledForUser) {
+                return PackageInstallStatus.Installed
+            }
+
+            // FLAG_INSTALLED is 0 (and not data-only):
+            // Under Android, when an app is hidden via DPM (setApplicationHidden), FLAG_INSTALLED is set to 0.
+            // If Limiter is Device Owner, verify via DPM whether the package is hidden.
+            if (isDeviceOwner) {
+                val hiddenRes = isApplicationHidden()
+                return if (hiddenRes.getOrNull() == true) {
+                    // Package existence is independently established by PackageInfo (not data-only),
+                    // and Device Owner confirms it is currently hidden.
+                    PackageInstallStatus.Installed
+                } else if (hiddenRes.isSuccess) {
+                    // Not hidden by DPM and FLAG_INSTALLED is 0: confirmed not installed for this user.
+                    PackageInstallStatus.NotInstalled
+                } else {
+                    PackageInstallStatus.Unknown("DPM hidden verification inconclusive: $hiddenRes")
+                }
+            }
+
+            return PackageInstallStatus.Unknown("FLAG_INSTALLED is 0 but Device Owner is absent to verify hidden state")
+        }
+    }
+
+    override fun isPackageInstalled(pkg: String): Boolean {
+        return getPackageInstallStatus(pkg) is PackageInstallStatus.Installed
     }
 
     override fun getAllFrozenPackages(): List<String> {
         if (!isDeviceOwner()) return emptyList()
         val pm = context.packageManager
         val packages = try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                pm.getInstalledPackages(
-                    PackageManager.PackageInfoFlags.of(PackageManager.MATCH_UNINSTALLED_PACKAGES.toLong())
-                )
-            } else {
-                @Suppress("DEPRECATION")
-                pm.getInstalledPackages(PackageManager.MATCH_UNINSTALLED_PACKAGES)
-            }
+            pm.getInstalledPackages(
+                PackageManager.PackageInfoFlags.of(PackageManager.MATCH_UNINSTALLED_PACKAGES.toLong())
+            )
         } catch (_: Exception) {
             emptyList()
         }

@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import com.limiter.app.LimiterApp
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * System events receiver per AGENTS.md §43.
@@ -33,20 +34,42 @@ class SystemEventsReceiver : BroadcastReceiver() {
             Intent.ACTION_MY_PACKAGE_REPLACED,
             Intent.ACTION_TIME_CHANGED,
             Intent.ACTION_TIMEZONE_CHANGED -> {
-                app.applicationScope.launch {
-                    // After app update, clear and rebuild alarms
-                    if (intent.action == Intent.ACTION_MY_PACKAGE_REPLACED) {
-                        app.timeWindowScheduler?.cancelAll()
+                val pendingResult = goAsync()
+                val finished = AtomicBoolean(false)
+                fun finishOnce() {
+                    if (finished.compareAndSet(false, true)) {
+                        try {
+                            pendingResult.finish()
+                        } catch (t: Throwable) {
+                            android.util.Log.w("Limiter", "Error finishing pending result in SystemEventsReceiver", t)
+                        }
                     }
+                }
 
-                    // Reconcile and reschedule
-                    coordinator.reconcile()
-                    app.timeWindowScheduler?.reschedule()
+                try {
+                    val job = app.applicationScope.launch {
+                        try {
+                            // After app update, clear and rebuild alarms
+                            if (intent.action == Intent.ACTION_MY_PACKAGE_REPLACED) {
+                                app.timeWindowScheduler?.cancelAll()
+                            }
 
-                    // Ensure monitoring where allowed per AGENTS.md §43
-                    if (app.isDeviceOwner()) {
-                        com.limiter.app.service.UsageMonitorService.start(context)
+                            // Reconcile and reschedule
+                            coordinator.reconcile()
+                            app.timeWindowScheduler?.reschedule()
+
+                            // Ensure monitoring where allowed per AGENTS.md §43
+                            if (app.isDeviceOwner()) {
+                                com.limiter.app.service.UsageMonitorService.start(context)
+                            }
+                        } catch (t: Throwable) {
+                            android.util.Log.e("Limiter", "Error processing system event: ${intent.action}", t)
+                        }
                     }
+                    job.invokeOnCompletion { finishOnce() }
+                } catch (t: Throwable) {
+                    android.util.Log.e("Limiter", "Failed to schedule coroutine in SystemEventsReceiver", t)
+                    finishOnce()
                 }
             }
         }

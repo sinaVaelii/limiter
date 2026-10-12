@@ -115,22 +115,48 @@ class DeviceCriticalPackageResolver(
         protected.add("com.google.android.gsf")
 
         // Package verifier
-        val verifierIntent = Intent("android.intent.action.PACKAGE_NEEDS_VERIFICATION")
-        verifierIntent.type = "application/vnd.android.package-archive"
-        pm.queryBroadcastReceivers(verifierIntent, 0).forEach {
-            protected.add(it.activityInfo.packageName)
-        }
+        try {
+            val verifierIntent = Intent("android.intent.action.PACKAGE_NEEDS_VERIFICATION")
+            verifierIntent.type = "application/vnd.android.package-archive"
+            pm.queryBroadcastReceivers(verifierIntent, 0).forEach { resolveInfo ->
+                resolveInfo.activityInfo?.packageName?.let { protected.add(it) }
+            }
+        } catch (_: Exception) { /* package verifier query failure fallback */ }
 
         return protected
     }
 
     override fun isEligibleTarget(packageName: String): Boolean {
+        // Essential recovery and protected packages are strictly NEVER eligible targets
+        if (packageName in resolveProtected()) {
+            return false
+        }
+
         val pm = context.packageManager
         return try {
             val appInfo = pm.getApplicationInfo(packageName, 0)
-            // Only non-system user-installed apps are eligible
-            (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) == 0
+            if (!appInfo.enabled) {
+                return false
+            }
+
+            val isUserApp = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) == 0
+            val isUpdatedSystemApp = (appInfo.flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
+
+            if (isUserApp || isUpdatedSystemApp) {
+                true
+            } else {
+                // Pre-installed system app (e.g. Chrome, YouTube):
+                // Eligible only if it exposes a user-launchable launcher activity and is not protected
+                val launcherIntent = Intent(Intent.ACTION_MAIN)
+                    .addCategory(Intent.CATEGORY_LAUNCHER)
+                    .setPackage(packageName)
+                val activities = pm.queryIntentActivities(launcherIntent, 0)
+                activities.isNotEmpty()
+            }
         } catch (_: PackageManager.NameNotFoundException) {
+            false
+        } catch (_: Exception) {
+            // Unexpected PackageManager exceptions: safely return false
             false
         }
     }

@@ -82,7 +82,8 @@ class MainViewModel(
     private val appDiscoveryRepository: AppDiscoveryRepository? = null,
     private val criticalPackageResolver: CriticalPackageResolver? = null,
     private val systemStatusChecker: SystemStatusChecker? = null,
-    private val timeWindowScheduler: TimeWindowScheduler? = null
+    private val timeWindowScheduler: TimeWindowScheduler? = null,
+    private val ioDispatcher: kotlinx.coroutines.CoroutineDispatcher = kotlinx.coroutines.Dispatchers.IO
 ) : ViewModel() {
 
     private val _availableApps = MutableStateFlow<List<DiscoveredApp>>(emptyList())
@@ -92,18 +93,37 @@ class MainViewModel(
     private val _batchResult = MutableStateFlow<BatchResult?>(null)
     private val _feedbackMessage = MutableStateFlow<String?>(null)
     private val _currentMillis = MutableStateFlow(timeSource.nowMillis())
+    private val _cachedProtectedPackages = MutableStateFlow<Set<String>>(emptySet())
     private val _systemStatus = MutableStateFlow(
         systemStatusChecker?.checkStatus() ?: SystemStatus(isDeviceOwner = dpmGateway.isDeviceOwner())
     )
+
+    init {
+        viewModelScope.launch(ioDispatcher) {
+            refreshProtectedPackages()
+        }
+    }
+
+    private suspend fun refreshProtectedPackages() {
+        try {
+            _cachedProtectedPackages.value = criticalPackageResolver?.resolveProtected() ?: emptySet()
+        } catch (_: Exception) {}
+    }
 
     fun tickCurrentTime() {
         _currentMillis.value = timeSource.nowMillis()
     }
 
     fun refreshSystemStatus() {
-        _systemStatus.value = systemStatusChecker?.checkStatus()
-            ?: SystemStatus(isDeviceOwner = dpmGateway.isDeviceOwner())
         _currentMillis.value = timeSource.nowMillis()
+        viewModelScope.launch(ioDispatcher) {
+            try {
+                val status = systemStatusChecker?.checkStatus()
+                    ?: SystemStatus(isDeviceOwner = dpmGateway.isDeviceOwner())
+                _systemStatus.value = status
+                refreshProtectedPackages()
+            } catch (_: Exception) {}
+        }
     }
 
     val uiState: StateFlow<MainUiState> = combine(
@@ -126,13 +146,13 @@ class MainViewModel(
         },
         _systemStatus,
         _currentMillis,
-        _feedbackMessage
-    ) { core, picker, systemStatus, nowMillis, feedback ->
+        combine(_feedbackMessage, _cachedProtectedPackages) { fb, prot -> fb to prot }
+    ) { core, picker, systemStatus, nowMillis, (feedback, protectedPkgs) ->
         val selfLock = SelfLockPolicy.calculateSelfLockStatus(
             targets = core.targets,
             nowMillis = nowMillis,
             zone = timeSource.zone(),
-            protectedPackages = criticalPackageResolver?.resolveProtected() ?: emptySet()
+            protectedPackages = protectedPkgs
         )
         MainUiState(
             isDeviceOwner = systemStatus.isDeviceOwner,
@@ -269,6 +289,7 @@ class MainViewModel(
                         is SettingsPolicy.EditResult.Duplicate -> failed[pkg] = "Already configured"
                         is SettingsPolicy.EditResult.NotFound -> failed[pkg] = "Not found"
                         is SettingsPolicy.EditResult.Invalid -> failed[pkg] = "Invalid: ${result.reason}"
+                        is SettingsPolicy.EditResult.SelfLocked -> failed[pkg] = "Management controls locked"
                     }
                 } catch (e: Exception) {
                     failed[pkg] = e.message ?: "Configuration error"
@@ -314,6 +335,7 @@ class MainViewModel(
                 is SettingsPolicy.EditResult.PartialApplied -> _feedbackMessage.value = "Tightening applied; loosening deferred to tomorrow"
                 is SettingsPolicy.EditResult.Invalid -> _feedbackMessage.value = "Invalid configuration: ${result.reason}"
                 is SettingsPolicy.EditResult.Protected -> _feedbackMessage.value = "${config.packageName} is protected"
+                is SettingsPolicy.EditResult.SelfLocked -> _feedbackMessage.value = "Management controls are locked during active restriction window"
                 else -> {}
             }
         }
@@ -339,6 +361,9 @@ class MainViewModel(
                 }
                 is SettingsPolicy.RemoveResult.NotFound -> {
                     _feedbackMessage.value = "$packageName not found"
+                }
+                is SettingsPolicy.RemoveResult.SelfLocked -> {
+                    _feedbackMessage.value = "Management controls are locked during active restriction window"
                 }
             }
         }

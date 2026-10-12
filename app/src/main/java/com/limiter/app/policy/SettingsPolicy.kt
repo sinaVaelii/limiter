@@ -37,6 +37,9 @@ object SettingsPolicy {
 
         /** Invalid configuration. */
         data class Invalid(val reason: String) : EditResult
+
+        /** Management controls locked during active restriction window. */
+        data object SelfLocked : EditResult
     }
 
     sealed interface AddResult {
@@ -44,11 +47,13 @@ object SettingsPolicy {
         data object Duplicate : AddResult
         data object Protected : AddResult
         data class Invalid(val reason: String) : AddResult
+        data object SelfLocked : AddResult
     }
 
     sealed interface RemoveResult {
         data class Deferred(val pending: PendingChange) : RemoveResult
         data object NotFound : RemoveResult
+        data object SelfLocked : RemoveResult
     }
 
     /**
