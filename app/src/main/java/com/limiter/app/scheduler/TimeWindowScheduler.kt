@@ -194,39 +194,43 @@ class TimeWindowScheduler(
             lockRecords: Collection<LockRecord>,
             now: Long
         ): EarliestUnlockPlan? {
-            var earliestUnlockMillis: Long? = null
+            var earliestTriggerMillis: Long? = null
             var isRetryAlarm = false
+
             for (record in lockRecords) {
-                val relevantTime = when (val state = record.state) {
+                val plan = when (val state = record.state) {
                     is LockState.LockedUntil -> {
                         val retryAt = record.nextUnlockRetryAtMillis
                         when {
-                            retryAt != null && now >= state.untilEpochMillis -> retryAt
-                            else -> state.untilEpochMillis
+                            retryAt != null && now >= state.untilEpochMillis -> retryAt to true
+                            retryAt != null && retryAt < state.untilEpochMillis -> retryAt to true
+                            else -> state.untilEpochMillis to false
                         }
                     }
                     is LockState.ReleasePending -> {
-                        record.nextUnlockRetryAtMillis ?: now
+                        (record.nextUnlockRetryAtMillis ?: now) to true
                     }
                     is LockState.Unlocked -> {
-                        record.nextUnlockRetryAtMillis
+                        record.nextUnlockRetryAtMillis?.let { it to true }
                     }
                 } ?: continue
 
-                if (earliestUnlockMillis == null || relevantTime < earliestUnlockMillis) {
-                    earliestUnlockMillis = relevantTime
-                    isRetryAlarm = record.state is LockState.ReleasePending ||
-                            (record.nextUnlockRetryAtMillis != null && relevantTime == record.nextUnlockRetryAtMillis)
+                val (trigger, isRetry) = plan
+                if (earliestTriggerMillis == null || trigger < earliestTriggerMillis || (trigger == earliestTriggerMillis && isRetry)) {
+                    earliestTriggerMillis = trigger
+                    isRetryAlarm = isRetry
                 }
             }
 
-            return earliestUnlockMillis?.let { trigger ->
+            return earliestTriggerMillis?.let { trigger ->
                 val action = if (isRetryAlarm) ACTION_RETRY else ACTION_UNLOCK
                 val reqCode = if (isRetryAlarm) REQUEST_RETRY else REQUEST_UNLOCK
                 EarliestUnlockPlan(trigger, isRetryAlarm, reqCode, action)
             }
         }
     }
+
+    private val scheduledHideWindows = mutableMapOf<String, Int>()
 
     var lastRescheduleReport: RescheduleReport? = null
         private set
@@ -242,9 +246,22 @@ class TimeWindowScheduler(
         val targets = settingsRepository.snapshotTargets()
         val lockRecords = lockStateStore.snapshot()
 
+        // 0. Cancel alarms for targets that were removed
+        val currentTargetKeys = targets.keys
+        val removedTargets = (scheduledHideWindows.keys - currentTargetKeys).toList()
+        for (pkg in removedTargets) {
+            cancelHideAlarm(pkg)
+            scheduledHideWindows.remove(pkg)
+        }
+
         // 1. Schedule next-hide alarm per effective target with deterministic request codes
         val hideResults = mutableMapOf<String, AlarmScheduleResult>()
         for ((pkg, config) in targets) {
+            val previousHideMinute = scheduledHideWindows[pkg]
+            if (previousHideMinute != null && previousHideMinute != config.hideAtMinuteOfDay) {
+                // Window changed: cancel previous alarm before scheduling replacement
+                cancelHideAlarm(pkg)
+            }
             val hideMillis = TimeMath.nextOccurrence(now, zone, config.hideAtMinuteOfDay)
             val res = scheduleAlarm(
                 triggerMillis = hideMillis,
@@ -252,6 +269,7 @@ class TimeWindowScheduler(
                 requestCode = getHideRequestCode(pkg)
             )
             hideResults[pkg] = res
+            scheduledHideWindows[pkg] = config.hideAtMinuteOfDay
         }
 
         // 2. Schedule earliest unlock/retry alarm (including ReleasePending and backoff retries)
@@ -296,9 +314,11 @@ class TimeWindowScheduler(
         alarmDispatcher.cancel(intentFactory.createRetryIntent(), REQUEST_RETRY)
         // Cancel hide alarms for current targets
         val targets = settingsRepository.snapshotTargets()
-        for (pkg in targets.keys) {
+        val allToCancel = (targets.keys + scheduledHideWindows.keys).toSet()
+        for (pkg in allToCancel) {
             cancelHideAlarm(pkg)
         }
+        scheduledHideWindows.clear()
     }
 
     /**

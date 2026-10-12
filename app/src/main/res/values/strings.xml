@@ -16,6 +16,7 @@
     <string name="status_not_configured">Disabled</string>
     <string name="device_owner_cmd_hint">Provision command:\nadb shell dpm set-device-owner com.limiter.app/.admin.LimiterAdminReceiver</string>
     <string name="grant_permission">Grant</string>
+    <string name="btn_grant_exact_alarm">Grant Exact Alarm Permission</string>
 
     <!-- Self-Lock Restricted Mode Screen -->
     <string name="self_lock_title">Management Controls Locked</string>

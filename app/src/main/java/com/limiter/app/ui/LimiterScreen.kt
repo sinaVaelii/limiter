@@ -1,7 +1,10 @@
 package com.limiter.app.ui
 
 import android.app.TimePickerDialog
+import android.content.Intent
 import android.graphics.drawable.Drawable
+import android.net.Uri
+import android.provider.Settings
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -13,6 +16,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -459,6 +463,28 @@ fun StatusCard(state: MainUiState) {
                 activeText = stringResource(R.string.status_granted),
                 inactiveText = stringResource(R.string.status_not_granted)
             )
+
+            if (!state.hasExactAlarmPermission) {
+                val context = LocalContext.current
+                Spacer(modifier = Modifier.height(4.dp))
+                OutlinedButton(
+                    onClick = {
+                        try {
+                            val intent = Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
+                                data = Uri.parse("package:${context.packageName}")
+                            }
+                            context.startActivity(intent)
+                        } catch (e: Exception) {
+                            android.util.Log.e("Limiter", "Failed to open exact alarm settings", e)
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                ) {
+                    Text(text = stringResource(R.string.btn_grant_exact_alarm))
+                }
+            }
 
             StatusRow(
                 label = stringResource(R.string.status_device_policy),

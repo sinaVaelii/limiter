@@ -30,6 +30,7 @@ import com.limiter.app.scheduler.TimeWindowScheduler
 import com.limiter.app.service.UsageMonitorService
 import com.limiter.app.service.UsageMonitorWatchdog
 import com.limiter.app.time.FakeTimeSource
+import com.limiter.app.time.TimeMath
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -1821,6 +1822,166 @@ class RegressionFixesTest {
         assertEquals(30_000L, UsageMonitorService.calculateLoopBackoff(3))
         assertEquals(60_000L, UsageMonitorService.calculateLoopBackoff(4))
         assertEquals(60_000L, UsageMonitorService.calculateLoopBackoff(10))
+    }
+
+    // =========================================================================
+    // 20. Time Windows and Alarms Tests (P2: Deadline bug, H4)
+    // =========================================================================
+
+    @Test
+    fun deadlineCases_inTehranTimezone_conformToExpectedBounds() {
+        val tehran = ZoneId.of("Asia/Tehran")
+        val y = 2026
+        val m = 10
+        val d = 13
+
+        fun makeMillis(hour: Int, minute: Int, second: Int = 0): Long {
+            return ZonedDateTime.of(y, m, d, hour, minute, second, 0, tehran).toInstant().toEpochMilli()
+        }
+
+        // Case a: hide 17:10 (1030), reveal 17:14 (1034), now 17:10:30 -> today 17:14
+        val nowA = makeMillis(17, 10, 30)
+        val untilA = TimeMath.nextOccurrence(nowA, tehran, 1034)
+        assertEquals(makeMillis(17, 14, 0), untilA)
+        assertTrue(untilA - nowA <= 24 * 3600_000L)
+
+        // Case b: same, now 17:13:59 -> today 17:14
+        val nowB = makeMillis(17, 13, 59)
+        val untilB = TimeMath.nextOccurrence(nowB, tehran, 1034)
+        assertEquals(makeMillis(17, 14, 0), untilB)
+        assertTrue(untilB - nowB <= 24 * 3600_000L)
+
+        // Case c: same, now 17:14:00 -> not inside window; next hide tomorrow 17:10
+        val nowC = makeMillis(17, 14, 0)
+        val nextHideC = TimeMath.nextOccurrence(nowC, tehran, 1030)
+        assertEquals(ZonedDateTime.of(y, m, d + 1, 17, 10, 0, 0, tehran).toInstant().toEpochMilli(), nextHideC)
+        assertTrue(nextHideC - nowC <= 24 * 3600_000L)
+
+        // Case d1: overnight hide 21:30 (1290), reveal 07:00 (420), now 22:00 -> tomorrow 07:00
+        val nowD1 = makeMillis(22, 0, 0)
+        val untilD1 = TimeMath.nextOccurrence(nowD1, tehran, 420)
+        assertEquals(ZonedDateTime.of(y, m, d + 1, 7, 0, 0, 0, tehran).toInstant().toEpochMilli(), untilD1)
+        assertTrue(untilD1 - nowD1 <= 24 * 3600_000L)
+
+        // Case d2: overnight hide 21:30, reveal 07:00, now 03:00 -> today 07:00
+        val nowD2 = makeMillis(3, 0, 0)
+        val untilD2 = TimeMath.nextOccurrence(nowD2, tehran, 420)
+        assertEquals(makeMillis(7, 0, 0), untilD2)
+        assertTrue(untilD2 - nowD2 <= 24 * 3600_000L)
+
+        // Case e: window start exactly at now (17:10:00) -> today 17:14
+        val nowE = makeMillis(17, 10, 0)
+        val untilE = TimeMath.nextOccurrence(nowE, tehran, 1034)
+        assertEquals(makeMillis(17, 14, 0), untilE)
+        assertTrue(untilE - nowE <= 24 * 3600_000L)
+
+        // Case f: timezone shift
+        val utcZone = ZoneId.of("UTC")
+        val untilF = TimeMath.nextOccurrence(nowA, utcZone, 1034)
+        assertTrue(untilF > nowA)
+        assertTrue(untilF - nowA <= 24 * 3600_000L)
+    }
+
+    @Test
+    fun expiredLock_reconcilesToUnlockedAndUnfreezes() = runTest(testDispatcher) {
+        val targetPkg = "com.dv.adm"
+        val pastDeadline = 1792244640000L // 2026-10-17 17:14:00
+        timeSource.setNowMillis(pastDeadline + 1000L) // now is strictly after deadline
+
+        gateway.installedPackages.add(targetPkg)
+        lockStateStore.ensureRecord(targetPkg)
+        lockStateStore.lockUntilAtLeast(targetPkg, pastDeadline)
+        freezer.freeze(targetPkg)
+
+        // Reconcile when now >= deadline
+        coordinator.reconcile()
+
+        // Must be unfreeze verified and unlocked
+        val record = lockStateStore.snapshot()[targetPkg]
+        assertNotNull(record)
+        assertEquals(LockState.Unlocked, record?.state)
+        assertEquals(false, freezer.isFrozen(targetPkg))
+    }
+
+    @Test
+    fun timeWindowScheduler_earliestUnlockPlan_handlesReleasePendingAndRetries() {
+        val now = 1_000_000L
+
+        // ReleasePending with no retry timestamp -> immediate retry at now
+        val recordsPending = listOf(
+            LockRecord(state = LockState.ReleasePending(requestedAtMillis = now - 5000L))
+        )
+        val plan1 = TimeWindowScheduler.calculateEarliestUnlockPlan(recordsPending, now)
+        assertNotNull(plan1)
+        assertEquals(now, plan1?.triggerMillis)
+        assertEquals(true, plan1?.isRetry)
+        assertEquals(TimeWindowScheduler.ACTION_RETRY, plan1?.action)
+        assertEquals(TimeWindowScheduler.REQUEST_RETRY, plan1?.requestCode)
+
+        // LockedUntil with nextUnlockRetryAtMillis earlier than lock deadline -> schedules retry!
+        val recordsRetry = listOf(
+            LockRecord(
+                state = LockState.LockedUntil(untilEpochMillis = now + 3600_000L),
+                nextUnlockRetryAtMillis = now + 15_000L
+            )
+        )
+        val plan2 = TimeWindowScheduler.calculateEarliestUnlockPlan(recordsRetry, now)
+        assertNotNull(plan2)
+        assertEquals(now + 15_000L, plan2?.triggerMillis)
+        assertEquals(true, plan2?.isRetry)
+        assertEquals(TimeWindowScheduler.ACTION_RETRY, plan2?.action)
+        assertEquals(TimeWindowScheduler.REQUEST_RETRY, plan2?.requestCode)
+    }
+
+    @Test
+    fun timeWindowScheduler_distinctPackages_neverShareRequestCodes() {
+        val pkgs = listOf(
+            "com.app.alpha",
+            "com.app.beta",
+            "com.google.android.youtube",
+            "org.telegram.messenger",
+            "com.instagram.android"
+        )
+        val codes = pkgs.map { TimeWindowScheduler.calculateHideRequestCode(it) }
+        assertEquals(pkgs.size, codes.distinct().size)
+    }
+
+    @Test
+    fun timeWindowScheduler_reschedule_cancelsRemovedTargetAndReplacesChangedWindow() = runTest(testDispatcher) {
+        val pkg1 = "com.app.one"
+        val pkg2 = "com.app.two"
+        alarmDispatcher.clear()
+
+        // 1. Initial schedule with 2 targets
+        settingsRepository.setTargetsAndPending(
+            targets = mapOf(
+                pkg1 to TargetAppConfig(packageName = pkg1, dailyLimitMinutes = 60, hideAtMinuteOfDay = 1380, revealAtMinuteOfDay = 420), // 23:00
+                pkg2 to TargetAppConfig(packageName = pkg2, dailyLimitMinutes = 60, hideAtMinuteOfDay = 1200, revealAtMinuteOfDay = 420)
+            ),
+            changes = emptyList()
+        )
+        scheduler.reschedule()
+        assertEquals(2, alarmDispatcher.exactScheduled.filter { it.requestCode in 20000..36383 }.size)
+        assertTrue(alarmDispatcher.cancelled.isEmpty())
+
+        // 2. Remove pkg2 and change pkg1 window (23:00 -> 22:00 = 1320)
+        alarmDispatcher.clear()
+        settingsRepository.setTargetsAndPending(
+            targets = mapOf(
+                pkg1 to TargetAppConfig(packageName = pkg1, dailyLimitMinutes = 60, hideAtMinuteOfDay = 1320, revealAtMinuteOfDay = 420)
+            ),
+            changes = emptyList()
+        )
+        scheduler.reschedule()
+
+        // pkg2 should be explicitly cancelled
+        val code2 = scheduler.getHideRequestCode(pkg2)
+        assertTrue(alarmDispatcher.cancelled.any { it.requestCode == code2 })
+
+        // pkg1 old window should be cancelled and replaced
+        val code1 = scheduler.getHideRequestCode(pkg1)
+        assertTrue(alarmDispatcher.cancelled.any { it.requestCode == code1 })
+        assertTrue(alarmDispatcher.exactScheduled.any { it.requestCode == code1 })
     }
 }
 

@@ -17,6 +17,7 @@
     <string name="status_not_configured">غیرفعال</string>
     <string name="device_owner_cmd_hint">دستور تنظیم مالک دستگاه:\nadb shell dpm set-device-owner com.limiter.app/.admin.LimiterAdminReceiver</string>
     <string name="grant_permission">اعطا</string>
+    <string name="btn_grant_exact_alarm">اعطای مجوز هشدار دقیق</string>
 
     <!-- صفحه حالت خود‌قفل با شمارش معکوس -->
     <string name="self_lock_title">رابط مدیریت قفل است</string>
