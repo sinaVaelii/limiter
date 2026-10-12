@@ -39,4 +39,21 @@ object UsageMonitorWatchdog {
         }
         return false
     }
+
+    /**
+     * Executes the watchdog reconciliation step: checks if any lock or retry deadline is due.
+     * If due, calls onReconcile and returns true. If not due, does nothing and returns false.
+     * Never calls DPM or freezer directly.
+     */
+    suspend fun reconcileIfDue(
+        records: Map<String, LockRecord>,
+        now: Long,
+        onReconcile: suspend () -> Unit
+    ): Boolean {
+        if (isAnyLockOrRetryDue(records, now)) {
+            onReconcile()
+            return true
+        }
+        return false
+    }
 }

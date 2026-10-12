@@ -222,8 +222,8 @@ class LockCoordinator(
             // However, after 3 consecutive Unknown failures, attempt unfreeze fallback per release safety gate.
             // If both restoreVisibility and restoreSuspension succeed, transition to Unlocked and commit.
             if (installStatus is PackageInstallStatus.Unknown) {
-                var visRestored = record.visibilityRestored
-                var unsusRestored = record.unsuspensionRestored
+                var visRestored = record.visibilityRestored || ((state as? LockState.ReleasePending)?.visibilityRestored ?: false)
+                var unsusRestored = record.unsuspensionRestored || ((state as? LockState.ReleasePending)?.unsuspensionRestored ?: false)
                 if (record.unlockFailureCount >= 3) {
                     if (!unsusRestored) {
                         val unsuspendResult = freezer.restoreSuspension(pkg)
@@ -307,10 +307,30 @@ class LockCoordinator(
             // Requirement 3: Ensure reconciliation cannot re-freeze a package while it is
             // undergoing release (state is not ReleasePending) or protected.
             if (now < lockedUntil.untilEpochMillis && pkg !in protectedPkgs) {
+                val retryAt = record.nextUnlockRetryAtMillis
+                if (retryAt != null && now < retryAt) {
+                    continue
+                }
                 val frozen = freezer.isFrozen(pkg)
                 if (frozen != true) {
                     // Repair physical state — do not change logical until
-                    freezer.freeze(pkg)
+                    val freezeResult = freezer.freeze(pkg)
+                    if (freezeResult !is DpmOperationResult.Ok) {
+                        safeLogE("Failed to repair freeze for $pkg: $freezeResult")
+                        lockStateStore.recordUnlockFailure(pkg, now)
+                        val updated = lockStateStore.snapshot()[pkg]
+                        if (updated != null) {
+                            lockRecords[pkg] = updated
+                        }
+                    } else {
+                        if (record.unlockFailureCount > 0 || record.nextUnlockRetryAtMillis != null) {
+                            lockStateStore.clearUnlockRetry(pkg)
+                            val updated = lockStateStore.snapshot()[pkg]
+                            if (updated != null) {
+                                lockRecords[pkg] = updated
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -339,11 +359,8 @@ class LockCoordinator(
                     }
                     is PackageInstallStatus.NotInstalled -> {
                         // Package is confirmed not installed on the device.
-                        // If removal was requested (desired == null), ensure removed from targets.
-                        if (change.desired == null) {
-                            updatedTargets.remove(change.packageName)
-                        }
-                        // Clear pending change so it doesn't re-trigger indefinitely
+                        // Ensure removed from targets and clear pending change so it doesn't re-trigger indefinitely.
+                        updatedTargets.remove(change.packageName)
                         remainingPending.removeAll { it.packageName == change.packageName }
                         continue
                     }
@@ -383,9 +400,18 @@ class LockCoordinator(
             if (isInsideWindow(config, now, zone)) {
                 val revealUntil = TimeMath.nextOccurrence(now, zone, config.revealAtMinuteOfDay)
                 lockStateStore.lockUntilAtLeast(pkg, revealUntil)
-                freezer.freeze(pkg)
-                lockRecords[pkg] = LockRecord(LockState.LockedUntil(revealUntil))
-                events.add(LockEvent.WindowLocked(pkg, revealUntil))
+                val freezeResult = freezer.freeze(pkg)
+                if (freezeResult is DpmOperationResult.Ok) {
+                    lockRecords[pkg] = LockRecord(LockState.LockedUntil(revealUntil))
+                    events.add(LockEvent.WindowLocked(pkg, revealUntil))
+                } else {
+                    safeLogE("Failed to freeze $pkg during scheduled window: $freezeResult")
+                    lockStateStore.recordUnlockFailure(pkg, now)
+                    val updated = lockStateStore.snapshot()[pkg]
+                    if (updated != null) {
+                        lockRecords[pkg] = updated
+                    }
+                }
             }
         }
 
@@ -515,7 +541,11 @@ class LockCoordinator(
         lockStateStore.lockUntilAtLeast(packageName, until)
 
         // 2. Freeze
-        freezer.freeze(packageName)
+        val freezeResult = freezer.freeze(packageName)
+        if (freezeResult !is DpmOperationResult.Ok) {
+            safeLogE("Failed to freeze $packageName on limit reached: $freezeResult")
+            lockStateStore.recordUnlockFailure(packageName, now)
+        }
     }
 
     /**
@@ -628,5 +658,15 @@ class LockCoordinator(
         }
         
         return@withLock removeResult
+    }
+
+    companion object {
+        private fun safeLogE(msg: String, tr: Throwable? = null) {
+            try {
+                if (tr != null) android.util.Log.e("Limiter", msg, tr) else android.util.Log.e("Limiter", msg)
+            } catch (_: Throwable) {
+                System.err.println("Limiter: $msg")
+            }
+        }
     }
 }

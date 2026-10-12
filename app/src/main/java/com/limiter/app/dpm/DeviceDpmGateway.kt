@@ -184,24 +184,28 @@ class DeviceDpmGateway(
     }
 
     override fun getPackageInstallStatus(pkg: String): PackageInstallStatus {
-        var pmException: Exception? = null
-        val packageInfo = try {
-            context.packageManager.getPackageInfo(
-                pkg,
-                PackageManager.PackageInfoFlags.of(PackageManager.MATCH_UNINSTALLED_PACKAGES.toLong())
+        return try {
+            var pmException: Exception? = null
+            val packageInfo = try {
+                context.packageManager.getPackageInfo(
+                    pkg,
+                    PackageManager.PackageInfoFlags.of(PackageManager.MATCH_UNINSTALLED_PACKAGES.toLong())
+                )
+            } catch (e: Exception) {
+                pmException = e
+                null
+            }
+
+            evaluateStatus(
+                packageInfo = packageInfo,
+                pmException = pmException,
+                isDeviceOwner = isDeviceOwner(),
+                isApplicationHidden = { isApplicationHidden(pkg) },
+                isPackageSuspended = { isPackageSuspended(pkg) }
             )
         } catch (e: Exception) {
-            pmException = e
-            null
+            PackageInstallStatus.Unknown("Unexpected error resolving install status for $pkg: ${e.message}", e)
         }
-
-        return evaluateStatus(
-            packageInfo = packageInfo,
-            pmException = pmException,
-            isDeviceOwner = isDeviceOwner(),
-            isApplicationHidden = { isApplicationHidden(pkg) },
-            isPackageSuspended = { isPackageSuspended(pkg) }
-        )
     }
 
     companion object {

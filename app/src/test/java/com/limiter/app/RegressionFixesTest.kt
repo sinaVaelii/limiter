@@ -1983,5 +1983,165 @@ class RegressionFixesTest {
         assertTrue(alarmDispatcher.cancelled.any { it.requestCode == code1 })
         assertTrue(alarmDispatcher.exactScheduled.any { it.requestCode == code1 })
     }
+
+    // =========================================================================
+    // 25. P3 Fix Verification Tests (H3, M2, M9, Stuck Locks Fallback)
+    // =========================================================================
+
+    // Test 25.1: H3 - UsageMonitorWatchdog.reconcileIfDue calls onReconcile 0 times when nothing due, exactly 1 when due
+    @Test
+    fun usageMonitorWatchdog_reconcileIfDue_nothingDue_zeroCalls_and_due_exactlyOneCall() = runTest(testDispatcher) {
+        val now = 100_000L
+        var reconcileCallCount = 0
+        val onReconcile: suspend () -> Unit = { reconcileCallCount++ }
+
+        // Case 1: Empty records -> 0 calls, returns false
+        val emptyResult = UsageMonitorWatchdog.reconcileIfDue(emptyMap(), now, onReconcile)
+        assertFalse(emptyResult)
+        assertEquals(0, reconcileCallCount)
+
+        // Case 2: Only future locks -> 0 calls, returns false
+        val futureRecords = mapOf(
+            "com.app.future" to LockRecord(state = LockState.LockedUntil(now + 10_000L))
+        )
+        val futureResult = UsageMonitorWatchdog.reconcileIfDue(futureRecords, now, onReconcile)
+        assertFalse(futureResult)
+        assertEquals(0, reconcileCallCount)
+
+        // Case 3: Due lock -> exactly 1 call, returns true
+        val dueRecords = mapOf(
+            "com.app.due" to LockRecord(state = LockState.LockedUntil(now - 1000L))
+        )
+        val dueResult = UsageMonitorWatchdog.reconcileIfDue(dueRecords, now, onReconcile)
+        assertTrue(dueResult)
+        assertEquals(1, reconcileCallCount)
+
+        // Case 4: Multiple due locks -> still exactly 1 call per invocation
+        val multiDueRecords = mapOf(
+            "com.app.due1" to LockRecord(state = LockState.LockedUntil(now - 1000L)),
+            "com.app.due2" to LockRecord(state = LockState.LockedUntil(now - 2000L))
+        )
+        val multiDueResult = UsageMonitorWatchdog.reconcileIfDue(multiDueRecords, now, onReconcile)
+        assertTrue(multiDueResult)
+        assertEquals(2, reconcileCallCount) // 1 previous + 1 current = 2 total
+    }
+
+    // Test 25.2: M2 - freeze() failure during window lock does NOT emit WindowLocked and schedules retry with backoff
+    @Test
+    fun freezeFailure_duringWindowLock_doesNotRecordLockedVerified_schedulesRetryWithBackoff() = runTest(testDispatcher) {
+        val pkg = "com.example.freezefail.window"
+        val now = zdtToMillis(23, 15) // Inside 23:00..07:00 window
+        timeSource.setNowMillis(now)
+
+        settingsRepository.setTargets(
+            mapOf(pkg to TargetAppConfig(packageName = pkg, dailyLimitMinutes = 60, hideAtMinuteOfDay = 1380, revealAtMinuteOfDay = 420))
+        )
+        gateway.installedPackages.add(pkg)
+
+        // Simulate freeze failure
+        gateway.suspendFailPackages.add(pkg)
+
+        val report = coordinator.reconcile()
+        assertTrue(report is LockCoordinator.ReconcileResult.Ok)
+        val okResult = report as LockCoordinator.ReconcileResult.Ok
+
+        // Package must NOT be verified/emitted as WindowLocked
+        assertFalse("Must NOT emit WindowLocked on freeze failure", okResult.events.any {
+            it is LockCoordinator.LockEvent.WindowLocked && it.pkg == pkg
+        })
+
+        // Retry state must be scheduled with backoff
+        val record = lockStateStore.snapshot()[pkg]
+        assertNotNull("Record must exist", record)
+        assertEquals("Failure count must be 1", 1, record!!.unlockFailureCount)
+        assertEquals("Retry timestamp must be scheduled at now + 30s", now + 30_000L, record.nextUnlockRetryAtMillis)
+
+        // Physical freeze must NOT be in place
+        assertFalse(freezer.isFrozen(pkg) == true)
+
+        // Advance past backoff window, clear failure simulation, reconcile again (Phase D.5 repair)
+        timeSource.setNowMillis(now + 30_000L)
+        gateway.suspendFailPackages.remove(pkg)
+
+        coordinator.reconcile()
+
+        // Repair must succeed: retry cleared, package frozen!
+        val repairedRecord = lockStateStore.snapshot()[pkg]
+        assertEquals("Retry count must be reset to 0 after successful repair", 0, repairedRecord!!.unlockFailureCount)
+        assertEquals("Retry timestamp must be null", null, repairedRecord.nextUnlockRetryAtMillis)
+        assertTrue("Package must now be physically frozen", freezer.isFrozen(pkg) == true)
+    }
+
+    // Test 25.3: M2 - freeze() failure on limit reached schedules bounded retry with backoff
+    @Test
+    fun freezeFailure_onLimitReached_schedulesRetryWithBackoff() = runTest(testDispatcher) {
+        val pkg = "com.example.freezefail.limit"
+        val now = zdtToMillis(14, 0)
+        timeSource.setNowMillis(now)
+
+        settingsRepository.setTargets(
+            mapOf(pkg to TargetAppConfig(packageName = pkg, dailyLimitMinutes = 60, hideAtMinuteOfDay = 1380, revealAtMinuteOfDay = 420))
+        )
+        gateway.installedPackages.add(pkg)
+
+        // Simulate freeze failure
+        gateway.suspendFailPackages.add(pkg)
+
+        coordinator.onLimitReached(pkg, 60 * 60_000L)
+
+        val record = lockStateStore.snapshot()[pkg]
+        assertNotNull("Record must exist", record)
+        assertEquals("Failure count must be 1", 1, record!!.unlockFailureCount)
+        assertEquals("Retry timestamp must be scheduled at now + 30s", now + 30_000L, record.nextUnlockRetryAtMillis)
+    }
+
+    // Test 25.4: M9 - unexpected exception in evaluateStatus returns Unknown, isPackageInstalled is false
+    @Test
+    fun evaluateStatus_unexpectedException_returnsUnknown_andIsPackageInstalledReturnsFalse() {
+        val unexpectedEx = IllegalStateException("Unexpected IPC / binder crash")
+        val status = DeviceDpmGateway.evaluateStatus(
+            packageInfo = null,
+            pmException = unexpectedEx,
+            isDeviceOwner = true,
+            isApplicationHidden = { Result.success(false) },
+            isPackageSuspended = { Result.success(false) }
+        )
+
+        assertTrue("Status must be Unknown on unexpected exception", status is PackageInstallStatus.Unknown)
+        assertFalse("Package must not be classified as Installed", status is PackageInstallStatus.Installed)
+        assertFalse("Package must not be classified as NotInstalled", status is PackageInstallStatus.NotInstalled)
+    }
+
+    // Test 25.5: Fallback against stuck locks - when restore fails at 3 failures, retry state is preserved and not unlocked
+    @Test
+    fun fallbackAgainstStuckLocks_whenRestoreFailsAtThreeFailures_preservesRetryStateAndDoesNotUnlock() = runTest(testDispatcher) {
+        val targetPkg = "com.example.retry.fallback.fail"
+        val currentTime = zdtToMillis(9, 0)
+        timeSource.setNowMillis(currentTime)
+
+        // Lock expired, previously accumulated 3 unlock failures; backoff from failure 3 (120s) has elapsed
+        lockStateStore.lockUntilAtLeast(targetPkg, currentTime - 1000L)
+        lockStateStore.recordUnlockFailure(targetPkg, currentTime - 400_000L) // 1 (backoff 30s)
+        lockStateStore.recordUnlockFailure(targetPkg, currentTime - 300_000L) // 2 (backoff 60s)
+        lockStateStore.recordUnlockFailure(targetPkg, currentTime - 150_000L) // 3 (backoff 120s -> retryAt was currentTime - 30s)
+        assertEquals(3, lockStateStore.snapshot()[targetPkg]?.unlockFailureCount)
+
+        gateway.hiddenPackages.add(targetPkg)
+        gateway.suspendedPackages.add(targetPkg)
+        gateway.packageInstallStatusMap[targetPkg] = PackageInstallStatus.Unknown("Transient query error")
+
+        // Unhide will fail during restore fallback
+        gateway.unhideFailPackages.add(targetPkg)
+
+        // Reconcile: count is 3, triggers fallback restore, but unhide fails!
+        coordinator.reconcile()
+
+        val record = lockStateStore.snapshot()[targetPkg]
+        assertNotNull("Record must still exist", record)
+        assertFalse("Must NOT transition to Unlocked when restore fails", record!!.state is LockState.Unlocked)
+        assertEquals("Failure count must be incremented to 4", 4, record.unlockFailureCount)
+        assertEquals("Next retry must be scheduled with backoff at now + 300s", currentTime + 300_000L, record.nextUnlockRetryAtMillis)
+        assertTrue("Package must still be hidden", gateway.hiddenPackages.contains(targetPkg))
+    }
 }
 

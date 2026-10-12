@@ -145,6 +145,7 @@ class UsageMonitorService : LifecycleService() {
 
                 val allSnapshots = mutableMapOf<String, UsageSnapshot.Available>()
                 val usageMap = reader.readTodayUsageMillisBatch(targets.keys)
+                var anyLimitReached = false
 
                 for ((pkg, config) in targets) {
                     val usedMillis = usageMap[pkg] ?: 0L
@@ -166,7 +167,7 @@ class UsageMonitorService : LifecycleService() {
                     // 5. Check limit: usedMillis >= limitMinutes * 60_000L
                     if (usedMillis >= limitMillis) {
                         callback?.onLimitReached(pkg, usedMillis)
-                        app.timeWindowScheduler?.reschedule()
+                        anyLimitReached = true
                     }
                 }
 
@@ -175,8 +176,11 @@ class UsageMonitorService : LifecycleService() {
                 // 5.5. Watchdog check: reconcile and reschedule if any lock deadline or retry is due
                 val currentLockRecords = app.lockStateStore.snapshot()
                 val nowMillis = app.timeSource.nowMillis()
-                if (UsageMonitorWatchdog.isAnyLockOrRetryDue(currentLockRecords, nowMillis)) {
+                val reconciled = UsageMonitorWatchdog.reconcileIfDue(currentLockRecords, nowMillis) {
                     app.lockCoordinator?.reconcile()
+                }
+
+                if (anyLimitReached || reconciled) {
                     app.timeWindowScheduler?.reschedule()
                 }
 
