@@ -1,17 +1,16 @@
 # Limiter State Tracker
 
-- **Current Phase:** P2 completed | **Commit:** `1c79141`
+- **Current Phase:** P3 completed | **Commit:** `815c67c`
 - **Decisions:**
   - D1: Baseline `compileSdk=targetSdk=minSdk=34`; test device runs Android 15 (API 35).
   - D2: `UsageMonitorService` may invoke `LockCoordinator.reconcile()` when lock/retry is due.
   - D3: `SCHEDULE_EXACT_ALARM` appops permission authorized for granting in P2.
   - D4: Clock tampering (H7) options documented in triage; no code changes.
   - D5: Max daily limit 720m, max raise +30m, self-lock allows viewing & adding targets.
-- **Phases Completed:** P0 (Triage), P1 (Entry Points: H1, H5, H6), P2 (Time Windows & Alarms: H4).
+- **Phases Completed:** P0 (Triage), P1 (Entry Points: H1, H5, H6), P2 (Time Windows & Alarms: H4), P3 (Lock/Unlock: H3, M1, M2, M3, M8, M9, fallback).
 - **Open Issues:**
   - H2: `SelfLockScreen` uses `System.currentTimeMillis()`; dashboard timer missing.
-  - M2: `freezer.freeze()` result unchecked; lock recorded on freeze failure.
-  - M4: `UsageStatsReader` queries 48h lookback per tick; `reschedule()` spam.
+  - M4: `UsageStatsReader` queries 48h lookback per tick.
   - M5: `checkStatus()` runs in `MainViewModel` property init on Main thread.
   - M7: System apps toggle in app picker missing (resolver supports launchable system apps).
   - L1: Dead code in `LockCoordinator.onTick` & `DeviceDpmGateway.getAllFrozenPackages`.
@@ -20,7 +19,7 @@
   - B5: Stale Stage 1 comment in `device_admin.xml`.
   - B6: Dead `Build.VERSION.SDK_INT >= Build.VERSION_CODES.S` check in `Theme.kt`.
   - D1: README test count & documentation divergence.
-  - T1: Missing unit tests for service loop and receiver completion (partially addressed in P1/P2).
+  - T1: Missing unit tests for service loop and receiver completion.
 - **Phone Status (Xiaomi Redmi 12 - `4a952d897d79`):**
   - Device Owner: Active (`com.limiter.app/.admin.LimiterAdminReceiver`).
   - FGS: Active (`UsageMonitorService`, `systemExempted` type `0x400`).
