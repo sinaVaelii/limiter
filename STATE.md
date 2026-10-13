@@ -1,6 +1,6 @@
 # Limiter State Tracker
 
-- **Current Phase:** P5 completed | **Commit:** `ab279bd`
+- **Current Phase:** P5 completed | **Commit:** `645bb2e`
 - **Decisions:**
   - D1: Baseline `compileSdk=targetSdk=minSdk=34`; test device runs Android 15 (API 35).
   - D2: `UsageMonitorService` invokes `LockCoordinator.reconcile()` when lock/retry is due.

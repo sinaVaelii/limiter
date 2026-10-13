@@ -1,5 +1,5 @@
 # Report P5 — Performance, Threading & Fault Tolerance
-Commit before/after: 771d727 -> pending
+Commit before/after: 771d727 -> 645bb2e
 
 ## Done
 - M6: Tolerant line-by-line snapshot decoding in `UsageSnapshotStore.kt:67-99` skips corrupt lines with warning logs; tested in `UsageSnapshotStoreTest.kt:38-70`.
