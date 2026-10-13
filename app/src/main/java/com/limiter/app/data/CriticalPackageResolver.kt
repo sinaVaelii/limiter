@@ -15,7 +15,7 @@ interface CriticalPackageResolver {
     fun isEligibleTarget(packageName: String): Boolean
 
     /** Returns true if [packageName] is eligible for targeting, optionally permitting launchable non-critical system apps. */
-    fun isEligibleTarget(packageName: String, allowSystemApps: Boolean): Boolean = isEligibleTarget(packageName)
+    fun isEligibleTarget(packageName: String, includeSystemApps: Boolean = false): Boolean = isEligibleTarget(packageName)
 
     /** Invalidate cached resolution results on package broadcast or app resume. */
     fun invalidateCache() {}

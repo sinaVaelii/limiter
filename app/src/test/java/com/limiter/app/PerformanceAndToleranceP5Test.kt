@@ -330,10 +330,10 @@ class PerformanceAndToleranceP5Test {
         override fun resolveProtected(): Set<String> = protectedSet
 
         override fun isEligibleTarget(packageName: String): Boolean {
-            return isEligibleTarget(packageName, allowSystemApps = false)
+            return isEligibleTarget(packageName, includeSystemApps = false)
         }
 
-        override fun isEligibleTarget(packageName: String, allowSystemApps: Boolean): Boolean {
+        override fun isEligibleTarget(packageName: String, includeSystemApps: Boolean): Boolean {
             // Protected apps can never be targeted
             if (packageName in protectedSet) return false
 
@@ -342,8 +342,8 @@ class PerformanceAndToleranceP5Test {
 
             if (!isUserApp && !isSystemApp) return false
 
-            // If system app, only allowed when allowSystemApps is true
-            if (isSystemApp && !allowSystemApps) return false
+            // If system app, only allowed when includeSystemApps is true
+            if (isSystemApp && !includeSystemApps) return false
 
             return true
         }
@@ -376,34 +376,34 @@ class PerformanceAndToleranceP5Test {
             launchableUserApps = userApps
         )
 
-        // 1. With allowSystemApps = false:
+        // 1. With includeSystemApps = false:
         // User apps are eligible
-        assertTrue(resolver.isEligibleTarget("org.telegram.messenger", allowSystemApps = false))
-        assertTrue(resolver.isEligibleTarget("com.instagram.android", allowSystemApps = false))
+        assertTrue(resolver.isEligibleTarget("org.telegram.messenger", includeSystemApps = false))
+        assertTrue(resolver.isEligibleTarget("com.instagram.android", includeSystemApps = false))
         // System apps are NOT eligible
-        assertFalse(resolver.isEligibleTarget("com.google.android.youtube", allowSystemApps = false))
-        assertFalse(resolver.isEligibleTarget("com.android.chrome", allowSystemApps = false))
-        assertFalse(resolver.isEligibleTarget("com.miui.player", allowSystemApps = false))
+        assertFalse(resolver.isEligibleTarget("com.google.android.youtube", includeSystemApps = false))
+        assertFalse(resolver.isEligibleTarget("com.android.chrome", includeSystemApps = false))
+        assertFalse(resolver.isEligibleTarget("com.miui.player", includeSystemApps = false))
         // Protected apps are NOT eligible
-        assertFalse(resolver.isEligibleTarget("com.limiter.app", allowSystemApps = false))
-        assertFalse(resolver.isEligibleTarget("com.android.settings", allowSystemApps = false))
+        assertFalse(resolver.isEligibleTarget("com.limiter.app", includeSystemApps = false))
+        assertFalse(resolver.isEligibleTarget("com.android.settings", includeSystemApps = false))
 
-        // 2. With allowSystemApps = true:
+        // 2. With includeSystemApps = true:
         // User apps remain eligible
-        assertTrue(resolver.isEligibleTarget("org.telegram.messenger", allowSystemApps = true))
+        assertTrue(resolver.isEligibleTarget("org.telegram.messenger", includeSystemApps = true))
         // Launchable non-protected system apps become eligible!
-        assertTrue(resolver.isEligibleTarget("com.google.android.youtube", allowSystemApps = true))
-        assertTrue(resolver.isEligibleTarget("com.android.chrome", allowSystemApps = true))
-        assertTrue(resolver.isEligibleTarget("com.miui.player", allowSystemApps = true))
+        assertTrue(resolver.isEligibleTarget("com.google.android.youtube", includeSystemApps = true))
+        assertTrue(resolver.isEligibleTarget("com.android.chrome", includeSystemApps = true))
+        assertTrue(resolver.isEligibleTarget("com.miui.player", includeSystemApps = true))
         // CRITICAL INVARIANT: Protected packages remain strictly ineligible!
-        assertFalse(resolver.isEligibleTarget("com.limiter.app", allowSystemApps = true))
-        assertFalse(resolver.isEligibleTarget("android", allowSystemApps = true))
-        assertFalse(resolver.isEligibleTarget("com.android.systemui", allowSystemApps = true))
-        assertFalse(resolver.isEligibleTarget("com.android.settings", allowSystemApps = true))
-        assertFalse(resolver.isEligibleTarget("com.google.android.dialer", allowSystemApps = true))
-        assertFalse(resolver.isEligibleTarget("com.google.android.apps.messaging", allowSystemApps = true))
-        assertFalse(resolver.isEligibleTarget("com.google.android.inputmethod.latin", allowSystemApps = true))
+        assertFalse(resolver.isEligibleTarget("com.limiter.app", includeSystemApps = true))
+        assertFalse(resolver.isEligibleTarget("android", includeSystemApps = true))
+        assertFalse(resolver.isEligibleTarget("com.android.systemui", includeSystemApps = true))
+        assertFalse(resolver.isEligibleTarget("com.android.settings", includeSystemApps = true))
+        assertFalse(resolver.isEligibleTarget("com.google.android.dialer", includeSystemApps = true))
+        assertFalse(resolver.isEligibleTarget("com.google.android.apps.messaging", includeSystemApps = true))
+        assertFalse(resolver.isEligibleTarget("com.google.android.inputmethod.latin", includeSystemApps = true))
         // Non-installed or non-launchable apps remain ineligible
-        assertFalse(resolver.isEligibleTarget("com.unknown.package", allowSystemApps = true))
+        assertFalse(resolver.isEligibleTarget("com.unknown.package", includeSystemApps = true))
     }
 }

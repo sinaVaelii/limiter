@@ -1,132 +1,133 @@
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Limiter</string>
+    <string name="app_name">لیمیتر</string>
 
-    <!-- System Status & Onboarding -->
-    <string name="status_title">System Status</string>
-    <string name="status_device_owner">Device Owner</string>
-    <string name="status_usage_access">Usage Access</string>
-    <string name="status_notifications">Notifications</string>
-    <string name="status_exact_alarm">Exact Alarm</string>
-    <string name="status_device_policy">Self-Protection Policy</string>
-    <string name="status_active">Active</string>
-    <string name="status_granted">Granted</string>
-    <string name="status_missing">Missing</string>
-    <string name="status_not_granted">Not Granted</string>
-    <string name="status_blocked">Enforced</string>
-    <string name="status_not_configured">Disabled</string>
-    <string name="device_owner_cmd_hint">Provision command:\nadb shell dpm set-device-owner com.limiter.app/.admin.LimiterAdminReceiver</string>
-    <string name="grant_permission">Grant</string>
-    <string name="btn_grant_exact_alarm">Grant Exact Alarm Permission</string>
+    <!-- وضعیت سیستم و راه‌اندازی -->
+    <string name="status_title">وضعیت سیستم</string>
+    <string name="status_device_owner">مالک دستگاه (Device Owner)</string>
+    <string name="status_usage_access">دسترسی آمار استفاده (Usage Access)</string>
+    <string name="status_notifications">اعلان‌ها</string>
+    <string name="status_exact_alarm">هشدار دقیق (Exact Alarm)</string>
+    <string name="status_device_policy">سیاست خودمحافظتی</string>
+    <string name="status_active">فعال</string>
+    <string name="status_granted">اعطا شده</string>
+    <string name="status_missing">ناموجود</string>
+    <string name="status_not_granted">اعطا نشده</string>
+    <string name="status_blocked">اعمال شده</string>
+    <string name="status_not_configured">غیرفعال</string>
+    <string name="device_owner_cmd_hint">دستور تنظیم مالک دستگاه:\nadb shell dpm set-device-owner com.limiter.app/.admin.LimiterAdminReceiver</string>
+    <string name="grant_permission">اعطا</string>
+    <string name="btn_grant_exact_alarm">اعطای مجوز هشدار دقیق</string>
 
-    <!-- Self-Lock Restricted Mode Screen -->
-    <string name="self_lock_title">Management Controls Locked</string>
-    <string name="self_lock_subtitle">Limiter is self-locked during scheduled restriction window</string>
-    <string name="self_lock_countdown_label">Time until management controls unlock:</string>
-    <string name="self_lock_expected_unlock">Expected unlock time: %1$s</string>
-    <string name="self_lock_explanation">Application restrictions and background usage monitoring continue operating normally. Management controls cannot be accessed, modified, or bypassed until this restriction window concludes.</string>
-    <string name="self_lock_active_apps_title">Applications restricted in this window:</string>
+    <!-- صفحه حالت خود‌قفل با شمارش معکوس -->
+    <string name="self_lock_title">رابط مدیریت قفل است</string>
+    <string name="self_lock_subtitle">لیمیتر در بازه محدودیت زمان‌بندی‌شده قفل شده است</string>
+    <string name="self_lock_countdown_label">زمان باقی‌مانده تا بازگشایی رابط مدیریت:</string>
+    <string name="self_lock_expected_unlock">زمان پیش‌بینی‌شده بازگشایی: %1$s</string>
+    <string name="self_lock_explanation">محدودیت‌های برنامه‌ها و ردیابی مصرف در پس‌زمینه به طور کامل در حال اجرا هستند. تا پایان این بازه زمانی، دسترسی به تنظیمات، ویرایش یا حذف آن‌ها امکان‌پذیر نیست.</string>
+    <string name="self_lock_active_apps_title">برنامه‌های محدود در این بازه:</string>
 
-    <!-- Target Cards & Dashboard -->
-    <string name="configured_apps_title">Managed Applications</string>
-    <string name="no_apps_configured">No applications configured yet. Tap \'+\' to add applications.</string>
-    <string name="target_used_limit">%1$d / %2$d min used</string>
-    <string name="target_remaining">%1$d min remaining</string>
-    <string name="target_limit_reached">Daily limit reached</string>
-    <string name="target_status_locked">Locked until %1$s</string>
-    <string name="target_status_restoring">Restoration pending</string>
-    <string name="target_status_unlocked">Unlocked</string>
-    <string name="target_schedule_window">Lock window: %1$s – %2$s</string>
-    <string name="edit_target">Edit</string>
-    <string name="remove_target">Remove</string>
+    <!-- کارت‌های هدف و داشبورد -->
+    <string name="configured_apps_title">برنامه‌های تحت مدیریت</string>
+    <string name="no_apps_configured">هنوز برنامه‌ای تنظیم نشده است. دکمه \'+\' را برای افزودن لمس کنید.</string>
+    <string name="target_used_limit">%1$d از %2$d دقیقه مصرف شده</string>
+    <string name="target_remaining">%1$d دقیقه باقی‌مانده</string>
+    <string name="target_limit_reached">سقف مصرف روزانه پر شد</string>
+    <string name="target_status_locked">قفل تا %1$s</string>
+    <string name="target_status_restoring">در حال بازیابی</string>
+    <string name="target_status_unlocked">آزاد</string>
+    <string name="target_schedule_window">بازه قفل: %1$s تا %2$s</string>
+    <string name="edit_target">ویرایش</string>
+    <string name="remove_target">حذف</string>
 
-    <!-- App Picker & Dialogs -->
-    <string name="app_picker_title">Select Applications</string>
-    <string name="search_placeholder">Search applications…</string>
-    <string name="select_all">Select All</string>
-    <string name="clear_selection">Clear</string>
-    <string name="selected_count">%1$d selected</string>
-    <string name="no_apps_found">No eligible user applications found.</string>
-    <string name="configure_selected">Configure Selected</string>
-    <string name="batch_config_title">Configure Selected Apps</string>
-    <string name="edit_config_title">Edit Application Config</string>
-    <string name="daily_limit_label">Daily usage limit (minutes, 1–720)</string>
-    <string name="hide_time_label">Lock start time (Hide)</string>
-    <string name="reveal_time_label">Lock end time (Reveal)</string>
-    <string name="apply">Apply</string>
-    <string name="cancel">Cancel</string>
-    <string name="confirm">Confirm</string>
-    <string name="confirm_remove_title">Remove Application</string>
-    <string name="confirm_remove_msg">Are you sure you want to remove %1$s? Loosening or removal changes will take effect tomorrow.</string>
-    <string name="locked_readonly_title">Application Locked</string>
-    <string name="locked_readonly_msg">This application is currently locked. Configuration cannot be altered while locked.</string>
-    <string name="back">Back</string>
-    <string name="add_apps">Add Applications</string>
+    <!-- انتخاب برنامه و دیالوگ‌ها -->
+    <string name="app_picker_title">انتخاب برنامه‌ها</string>
+    <string name="search_placeholder">جستجوی برنامه‌ها…</string>
+    <string name="select_all">انتخاب همه</string>
+    <string name="clear_selection">پاک کردن</string>
+    <string name="selected_count">%1$d انتخاب شده</string>
+    <string name="no_apps_found">هیچ برنامه کاربری واجد شرایطی یافت نشد.</string>
+    <string name="configure_selected">تنظیم موارد انتخابی</string>
+    <string name="batch_config_title">تنظیم دسته‌ای محدودیت‌ها</string>
+    <string name="edit_config_title">ویرایش محدودیت برنامه</string>
+    <string name="daily_limit_label">سقف مصرف روزانه (دقیقه، ۱ تا ۷۲۰)</string>
+    <string name="hide_time_label">زمان شروع قفل (مخفی‌سازی)</string>
+    <string name="reveal_time_label">زمان پایان قفل (نمایش مجدد)</string>
+    <string name="apply">اعمال</string>
+    <string name="cancel">انصراف</string>
+    <string name="confirm">تأیید</string>
+    <string name="confirm_remove_title">حذف برنامه</string>
+    <string name="confirm_remove_msg">آیا از حذف %1$s اطمینان دارید؟ تغییرات تسهیل یا حذف برنامه از فردا اعمال خواهد شد.</string>
+    <string name="locked_readonly_title">برنامه قفل است</string>
+    <string name="locked_readonly_msg">این برنامه در حال حاضر قفل است. امکان تغییر تنظیمات در حالت قفل وجود ندارد.</string>
+    <string name="back">بازگشت</string>
+    <string name="add_apps">افزودن برنامه‌ها</string>
 
-    <!-- Pending & Edit Status -->
-    <string name="pending_removal">Pending: Removal (applies tomorrow)</string>
-    <string name="pending_change_summary">Pending update: Limit %1$dm, Window %2$s–%3$s</string>
-    <string name="pending_applies_epoch_day">Applies on or after epoch day: %1$d</string>
-    <string name="edit_current_effective">Currently effective: Limit %1$dm, Window %2$s–%3$s</string>
-    <string name="edit_pending_update">Pending update: Limit %1$dm, Window %2$s–%3$s (applies tomorrow)</string>
-    <string name="error_daily_limit_range">Daily limit must be between 1 and 720 minutes</string>
-    <string name="error_daily_limit_max">Daily limit cannot exceed 720 minutes (12 hours)</string>
-    <string name="error_limit_increase_max">Daily limit can be increased by at most 30 minutes per change</string>
-    <string name="error_identical_times">Hide time and reveal time cannot be identical</string>
+    <!-- وضعیت تغییرات معوق و ویرایش -->
+    <string name="pending_removal">تغییر معوق: حذف برنامه (اعمال از فردا)</string>
+    <string name="pending_change_summary">تغییر معوق: سقف %1$d دقیقه، بازه %2$s تا %3$s</string>
+    <string name="pending_applies_epoch_day">اعمال در روز مبدا یا پس از آن: %1$d</string>
+    <string name="edit_current_effective">تنظیمات فعال فعلی: سقف %1$d دقیقه، بازه %2$s تا %3$s</string>
+    <string name="edit_pending_update">تغییر معوق: سقف %1$d دقیقه، بازه %2$s تا %3$s (اعمال از فردا)</string>
+    <string name="error_daily_limit_range">سقف مصرف روزانه باید بین ۱ تا ۷۲۰ دقیقه باشد</string>
+    <string name="error_daily_limit_max">سقف مصرف روزانه نمی‌تواند بیش از ۷۲۰ دقیقه (۱۲ ساعت) باشد</string>
+    <string name="error_limit_increase_max">سقف مصرف روزانه در هر بار حداکثر ۳۰ دقیقه قابل افزایش است</string>
+    <string name="error_identical_times">زمان شروع و پایان قفل نمی‌توانند یکسان باشند</string>
 
-    <!-- P4 Product Rules & Self-Lock -->
-    <string name="picker_already_limited">Already limited</string>
-    <string name="self_lock_add_confirmation">This cannot be undone until the self-lock window ends</string>
-    <string name="self_lock_add_confirmation_title">Add Target During Self-Lock</string>
-    <string name="self_lock_view_dashboard">View Dashboard</string>
-    <string name="self_lock_controls_locked">Management controls are locked during active restriction window</string>
+    <!-- قوانین پی۴ و خود‌قفل -->
+    <string name="picker_already_limited">قبلاً محدود شده</string>
+    <string name="self_lock_add_confirmation">این کار تا پایان قفل خودکار قابل برگشت نیست</string>
+    <string name="self_lock_add_confirmation_title">افزودن برنامه در زمان قفل خودکار</string>
+    <string name="self_lock_view_dashboard">مشاهده داشبورد</string>
+    <string name="self_lock_controls_locked">رابط مدیریت در طول بازه محدودیت قفل است</string>
 
-    <!-- P5 System Apps Toggle -->
-    <string name="show_system_apps">Show system apps</string>
-    <string name="show_system_apps_confirm_title">Show System Apps?</string>
-    <string name="show_system_apps_confirm_msg">System apps can affect device operation. Essential system apps remain protected, but use caution when limiting other system apps.</string>
+    <!-- P5 دکمه جابجایی برنامه‌های سیستمی -->
+    <string name="show_system_apps">نمایش برنامه‌های سیستمی</string>
+    <string name="show_system_apps_confirm_title">نمایش برنامه‌های سیستمی؟</string>
+    <string name="show_system_apps_confirm_msg">برنامه‌های سیستمی می‌توانند بر عملکرد دستگاه تأثیر بگذارند. برنامه‌های حیاتی همچنان محافظت می‌شوند، اما در محدودسازی سایر برنامه‌ها احتیاط کنید.</string>
 
-    <!-- P6 UI/UX Redesign Strings -->
-    <string name="duration_chip_15m">15m</string>
-    <string name="duration_chip_30m">30m</string>
-    <string name="duration_chip_1h">1h</string>
-    <string name="duration_chip_2h">2h</string>
-    <string name="duration_chip_4h">4h</string>
-    <string name="duration_chip_8h">8h</string>
-    <string name="duration_chip_12h">12h</string>
-    <string name="duration_hours_minutes">%1$s h %2$s min</string>
-    <string name="duration_hours_only">%1$s h</string>
-    <string name="duration_minutes_only">%1$s min</string>
-    <string name="hours_stepper_label">Hours: %1$s</string>
-    <string name="minutes_stepper_label">Minutes: %1$s</string>
-    <string name="custom_duration_title">Custom Limit</string>
-    <string name="edit_limit_helper">Current %1$s — can be raised by at most %2$s per change; takes effect after the delay.</string>
-    <string name="window_summary">Hidden %1$s → %2$s</string>
-    <string name="chip_device_owner">Device Owner</string>
-    <string name="chip_usage_access">Usage Access</string>
-    <string name="chip_notifications">Notifications</string>
-    <string name="chip_exact_alarm">Exact Alarm</string>
-    <string name="chip_self_protection">Self-Protection</string>
-    <string name="chip_battery_optimization">Battery</string>
-    <string name="chip_ok">OK</string>
-    <string name="chip_fix">Fix</string>
-    <string name="health_fix_title">Permission / Setup Required</string>
-    <string name="battery_guidance_title">Background &amp; Battery Setup</string>
-    <string name="battery_guidance_msg">For uninterrupted monitoring on MIUI / HyperOS, ensure Limiter has Autostart enabled and Battery Saver set to No Restrictions.</string>
-    <string name="open_settings">Open Settings</string>
-    <string name="target_state_active">Active</string>
-    <string name="target_state_locked">Locked until %1$s</string>
-    <string name="target_state_pending">Pending change in %1$s</string>
-    <string name="target_next_event_lock">Next lock at %1$s</string>
-    <string name="target_next_event_unlock">Unlocks at %1$s</string>
-    <string name="target_next_event_reset">Daily limit resets at midnight</string>
-    <string name="pending_banner_title">Pending Changes</string>
-    <string name="pending_banner_subtitle">Takes effect tomorrow (epoch day %1$d)</string>
-    <string name="empty_targets_title">No Limited Applications</string>
-    <string name="empty_targets_msg">Select apps to enforce daily screen time limits or nighttime lock windows.</string>
-    <string name="empty_targets_action">Add First App</string>
-    <string name="self_lock_configured_limits">Managed Application Limits (Read-Only):</string>
-    <string name="self_lock_add_app_secondary">Add App</string>
-    <string name="time_picker_title">Select Time</string>
-    <string name="time_picker_confirm">OK</string>
-    <string name="time_picker_cancel">Cancel</string>
+    <!-- P6 بازطراحی رابط کاربری Material 3 -->
+    <string name="duration_chip_15m">۱۵ دقیقه</string>
+    <string name="duration_chip_30m">۳۰ دقیقه</string>
+    <string name="duration_chip_1h">۱ ساعت</string>
+    <string name="duration_chip_2h">۲ ساعت</string>
+    <string name="duration_chip_4h">۴ ساعت</string>
+    <string name="duration_chip_8h">۸ ساعت</string>
+    <string name="duration_chip_12h">۱۲ ساعت</string>
+    <string name="duration_hours_minutes">%1$s ساعت %2$s دقیقه</string>
+    <string name="duration_hours_only">%1$s ساعت</string>
+    <string name="duration_minutes_only">%1$s دقیقه</string>
+    <string name="hours_stepper_label">ساعت: %1$s</string>
+    <string name="minutes_stepper_label">دقیقه: %1$s</string>
+    <string name="custom_duration_title">سقف سفارشی</string>
+    <string name="edit_limit_helper">سقف فعلی: %1$s — در هر بار حداکثر %2$s قابل افزایش است؛ پس از تأخیر اعمال می‌شود.</string>
+    <string name="window_summary">مخفی‌سازی %1$s ← %2$s</string>
+    <string name="chip_device_owner">مالک دستگاه</string>
+    <string name="chip_usage_access">دسترسی مصرف</string>
+    <string name="chip_notifications">اعلان‌ها</string>
+    <string name="chip_exact_alarm">هشدار دقیق</string>
+    <string name="chip_self_protection">خودمحافظتی</string>
+    <string name="chip_battery_optimization">باتری</string>
+    <string name="chip_ok">فعال</string>
+    <string name="chip_fix">تنظیم</string>
+    <string name="health_fix_title">نیاز به اعطای دسترسی یا تنظیم</string>
+    <string name="battery_guidance_title">تنظیمات پس‌زمینه و بهینه‌سازی باتری</string>
+    <string name="battery_guidance_msg">برای مانیتورینگ بدون توقف در MIUI / HyperOS، اطمینان حاصل کنید که اجرای خودکار (Autostart) فعال و ذخیره باتری روی بدون محدودیت (No Restrictions) تنظیم شده است.</string>
+    <string name="open_settings">باز کردن تنظیمات</string>
+    <string name="target_state_active">فعال</string>
+    <string name="target_state_locked">قفل تا %1$s</string>
+    <string name="target_state_pending">تغییر معوق تا %1$s دیگر</string>
+    <string name="target_next_event_lock">شروع قفل در %1$s</string>
+    <string name="target_next_event_unlock">پایان قفل در %1$s</string>
+    <string name="target_next_event_reset">صفر شدن مصرف روزانه در نیمه‌شب</string>
+    <string name="pending_banner_title">تغییرات معوق</string>
+    <string name="pending_banner_subtitle">اعمال از فردا (روز مبدأ %1$d)</string>
+    <string name="empty_targets_title">هیچ برنامه‌ای تحت مدیریت نیست</string>
+    <string name="empty_targets_msg">برنامه‌هایی که مایلید سقف مصرف روزانه یا بازه قفل شبانه برای آن‌ها اعمال شود را انتخاب کنید.</string>
+    <string name="empty_targets_action">افزودن اولین برنامه</string>
+    <string name="self_lock_configured_limits">سقف‌های تنظیم‌شده برنامه‌ها (فقط خواندنی):</string>
+    <string name="self_lock_add_app_secondary">افزودن برنامه</string>
+    <string name="time_picker_title">انتخاب زمان</string>
+    <string name="time_picker_confirm">تأیید</string>
+    <string name="time_picker_cancel">انصراف</string>
 </resources>

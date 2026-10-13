@@ -1,0 +1,132 @@
+<resources>
+    <string name="app_name">Limiter</string>
+
+    <!-- System Status & Onboarding -->
+    <string name="status_title">System Status</string>
+    <string name="status_device_owner">Device Owner</string>
+    <string name="status_usage_access">Usage Access</string>
+    <string name="status_notifications">Notifications</string>
+    <string name="status_exact_alarm">Exact Alarm</string>
+    <string name="status_device_policy">Self-Protection Policy</string>
+    <string name="status_active">Active</string>
+    <string name="status_granted">Granted</string>
+    <string name="status_missing">Missing</string>
+    <string name="status_not_granted">Not Granted</string>
+    <string name="status_blocked">Enforced</string>
+    <string name="status_not_configured">Disabled</string>
+    <string name="device_owner_cmd_hint">Provision command:\nadb shell dpm set-device-owner com.limiter.app/.admin.LimiterAdminReceiver</string>
+    <string name="grant_permission">Grant</string>
+    <string name="btn_grant_exact_alarm">Grant Exact Alarm Permission</string>
+
+    <!-- Self-Lock Restricted Mode Screen -->
+    <string name="self_lock_title">Management Controls Locked</string>
+    <string name="self_lock_subtitle">Limiter is self-locked during scheduled restriction window</string>
+    <string name="self_lock_countdown_label">Time until management controls unlock:</string>
+    <string name="self_lock_expected_unlock">Expected unlock time: %1$s</string>
+    <string name="self_lock_explanation">Application restrictions and background usage monitoring continue operating normally. Management controls cannot be accessed, modified, or bypassed until this restriction window concludes.</string>
+    <string name="self_lock_active_apps_title">Applications restricted in this window:</string>
+
+    <!-- Target Cards & Dashboard -->
+    <string name="configured_apps_title">Managed Applications</string>
+    <string name="no_apps_configured">No applications configured yet. Tap \'+\' to add applications.</string>
+    <string name="target_used_limit">%1$d / %2$d min used</string>
+    <string name="target_remaining">%1$d min remaining</string>
+    <string name="target_limit_reached">Daily limit reached</string>
+    <string name="target_status_locked">Locked until %1$s</string>
+    <string name="target_status_restoring">Restoration pending</string>
+    <string name="target_status_unlocked">Unlocked</string>
+    <string name="target_schedule_window">Lock window: %1$s – %2$s</string>
+    <string name="edit_target">Edit</string>
+    <string name="remove_target">Remove</string>
+
+    <!-- App Picker & Dialogs -->
+    <string name="app_picker_title">Select Applications</string>
+    <string name="search_placeholder">Search applications…</string>
+    <string name="select_all">Select All</string>
+    <string name="clear_selection">Clear</string>
+    <string name="selected_count">%1$d selected</string>
+    <string name="no_apps_found">No eligible user applications found.</string>
+    <string name="configure_selected">Configure Selected</string>
+    <string name="batch_config_title">Configure Selected Apps</string>
+    <string name="edit_config_title">Edit Application Config</string>
+    <string name="daily_limit_label">Daily usage limit (minutes, 1–720)</string>
+    <string name="hide_time_label">Lock start time (Hide)</string>
+    <string name="reveal_time_label">Lock end time (Reveal)</string>
+    <string name="apply">Apply</string>
+    <string name="cancel">Cancel</string>
+    <string name="confirm">Confirm</string>
+    <string name="confirm_remove_title">Remove Application</string>
+    <string name="confirm_remove_msg">Are you sure you want to remove %1$s? Loosening or removal changes will take effect tomorrow.</string>
+    <string name="locked_readonly_title">Application Locked</string>
+    <string name="locked_readonly_msg">This application is currently locked. Configuration cannot be altered while locked.</string>
+    <string name="back">Back</string>
+    <string name="add_apps">Add Applications</string>
+
+    <!-- Pending & Edit Status -->
+    <string name="pending_removal">Pending: Removal (applies tomorrow)</string>
+    <string name="pending_change_summary">Pending update: Limit %1$dm, Window %2$s–%3$s</string>
+    <string name="pending_applies_epoch_day">Applies on or after epoch day: %1$d</string>
+    <string name="edit_current_effective">Currently effective: Limit %1$dm, Window %2$s–%3$s</string>
+    <string name="edit_pending_update">Pending update: Limit %1$dm, Window %2$s–%3$s (applies tomorrow)</string>
+    <string name="error_daily_limit_range">Daily limit must be between 1 and 720 minutes</string>
+    <string name="error_daily_limit_max">Daily limit cannot exceed 720 minutes (12 hours)</string>
+    <string name="error_limit_increase_max">Daily limit can be increased by at most 30 minutes per change</string>
+    <string name="error_identical_times">Hide time and reveal time cannot be identical</string>
+
+    <!-- P4 Product Rules & Self-Lock -->
+    <string name="picker_already_limited">Already limited</string>
+    <string name="self_lock_add_confirmation">This cannot be undone until the self-lock window ends</string>
+    <string name="self_lock_add_confirmation_title">Add Target During Self-Lock</string>
+    <string name="self_lock_view_dashboard">View Dashboard</string>
+    <string name="self_lock_controls_locked">Management controls are locked during active restriction window</string>
+
+    <!-- P5 System Apps Toggle -->
+    <string name="show_system_apps">Show system apps</string>
+    <string name="show_system_apps_confirm_title">Show System Apps?</string>
+    <string name="show_system_apps_confirm_msg">System apps can affect device operation. Essential system apps remain protected, but use caution when limiting other system apps.</string>
+
+    <!-- P6 UI/UX Redesign Strings -->
+    <string name="duration_chip_15m">15m</string>
+    <string name="duration_chip_30m">30m</string>
+    <string name="duration_chip_1h">1h</string>
+    <string name="duration_chip_2h">2h</string>
+    <string name="duration_chip_4h">4h</string>
+    <string name="duration_chip_8h">8h</string>
+    <string name="duration_chip_12h">12h</string>
+    <string name="duration_hours_minutes">%1$s h %2$s min</string>
+    <string name="duration_hours_only">%1$s h</string>
+    <string name="duration_minutes_only">%1$s min</string>
+    <string name="hours_stepper_label">Hours: %1$s</string>
+    <string name="minutes_stepper_label">Minutes: %1$s</string>
+    <string name="custom_duration_title">Custom Limit</string>
+    <string name="edit_limit_helper">Current %1$s — can be raised by at most %2$s per change; takes effect after the delay.</string>
+    <string name="window_summary">Hidden %1$s → %2$s</string>
+    <string name="chip_device_owner">Device Owner</string>
+    <string name="chip_usage_access">Usage Access</string>
+    <string name="chip_notifications">Notifications</string>
+    <string name="chip_exact_alarm">Exact Alarm</string>
+    <string name="chip_self_protection">Self-Protection</string>
+    <string name="chip_battery_optimization">Battery</string>
+    <string name="chip_ok">OK</string>
+    <string name="chip_fix">Fix</string>
+    <string name="health_fix_title">Permission / Setup Required</string>
+    <string name="battery_guidance_title">Background &amp; Battery Setup</string>
+    <string name="battery_guidance_msg">For uninterrupted monitoring on MIUI / HyperOS, ensure Limiter has Autostart enabled and Battery Saver set to No Restrictions.</string>
+    <string name="open_settings">Open Settings</string>
+    <string name="target_state_active">Active</string>
+    <string name="target_state_locked">Locked until %1$s</string>
+    <string name="target_state_pending">Pending change in %1$s</string>
+    <string name="target_next_event_lock">Next lock at %1$s</string>
+    <string name="target_next_event_unlock">Unlocks at %1$s</string>
+    <string name="target_next_event_reset">Daily limit resets at midnight</string>
+    <string name="pending_banner_title">Pending Changes</string>
+    <string name="pending_banner_subtitle">Takes effect tomorrow (epoch day %1$d)</string>
+    <string name="empty_targets_title">No Limited Applications</string>
+    <string name="empty_targets_msg">Select apps to enforce daily screen time limits or nighttime lock windows.</string>
+    <string name="empty_targets_action">Add First App</string>
+    <string name="self_lock_configured_limits">Managed Application Limits (Read-Only):</string>
+    <string name="self_lock_add_app_secondary">Add App</string>
+    <string name="time_picker_title">Select Time</string>
+    <string name="time_picker_confirm">OK</string>
+    <string name="time_picker_cancel">Cancel</string>
+</resources>

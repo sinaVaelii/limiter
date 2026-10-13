@@ -147,9 +147,9 @@ class DeviceCriticalPackageResolver(
     }
 
     override fun isEligibleTarget(packageName: String): Boolean =
-        isEligibleTarget(packageName, allowSystemApps = false)
+        isEligibleTarget(packageName, includeSystemApps = false)
 
-    override fun isEligibleTarget(packageName: String, allowSystemApps: Boolean): Boolean {
+    override fun isEligibleTarget(packageName: String, includeSystemApps: Boolean): Boolean {
         // Essential recovery and protected packages are strictly NEVER eligible targets
         if (packageName in resolveProtected()) {
             return false
@@ -163,7 +163,7 @@ class DeviceCriticalPackageResolver(
             }
 
             val isSystem = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0
-            if (isSystem && !allowSystemApps) {
+            if (isSystem && !includeSystemApps) {
                 return false
             }
 
