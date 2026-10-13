@@ -159,7 +159,8 @@ class MainViewModelR4Test {
             appDiscoveryRepository = discoveryRepo,
             criticalPackageResolver = resolver,
             systemStatusChecker = statusChecker,
-            ioDispatcher = testDispatcher
+            ioDispatcher = testDispatcher,
+            defaultDispatcher = testDispatcher
         )
     }
 
@@ -252,6 +253,7 @@ class MainViewModelR4Test {
             isUserControlDisabled = true
         )
         viewModel.refreshSystemStatus()
+        testScheduler.advanceUntilIdle()
 
         val state = viewModel.uiState.first()
         assertTrue(state.isDeviceOwner)

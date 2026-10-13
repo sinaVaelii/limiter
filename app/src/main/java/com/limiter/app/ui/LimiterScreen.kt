@@ -60,6 +60,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -867,6 +868,7 @@ fun AppPickerDialog(
     onProceedToConfigure: () -> Unit,
     onToggleShowSystemApps: (Boolean) -> Unit = {}
 ) {
+    var hasConfirmedSystemAppsDialog by rememberSaveable { mutableStateOf(false) }
     var showSystemConfirmDialog by remember { mutableStateOf(false) }
 
     if (showSystemConfirmDialog) {
@@ -877,6 +879,7 @@ fun AppPickerDialog(
             confirmButton = {
                 TextButton(
                     onClick = {
+                        hasConfirmedSystemAppsDialog = true
                         showSystemConfirmDialog = false
                         onToggleShowSystemApps(true)
                     }
@@ -968,7 +971,11 @@ fun AppPickerDialog(
                         checked = state.showSystemApps,
                         onCheckedChange = { isChecked ->
                             if (isChecked) {
-                                showSystemConfirmDialog = true
+                                if (!hasConfirmedSystemAppsDialog) {
+                                    showSystemConfirmDialog = true
+                                } else {
+                                    onToggleShowSystemApps(true)
+                                }
                             } else {
                                 onToggleShowSystemApps(false)
                             }

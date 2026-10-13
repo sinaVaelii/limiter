@@ -1,13 +1,13 @@
 # Limiter State Tracker
 
-- **Current Phase:** P5 completed | **Commit:** `43b9c8c`
+- **Current Phase:** P5 completed | **Commit:** `5e6d51b`
 - **Decisions:**
   - D1: Baseline `compileSdk=targetSdk=minSdk=34`; test device runs Android 15 (API 35).
   - D2: `UsageMonitorService` invokes `LockCoordinator.reconcile()` when lock/retry is due.
   - D3: `SCHEDULE_EXACT_ALARM` appops permission authorized for granting in P2.
   - D4: Clock tampering (H7) options documented in triage; no code changes.
   - D5: Max daily limit 720m, max raise +30m, self-lock allows viewing & adding targets.
-- **Phases Completed:** P0 (Triage), P1 (Entry Points), P2 (Time Windows/Alarms), P3 (Lock/Unlock/Fallbacks), P4 (Product Rules), P5 (Perf & Tolerance: M4, M5, M6, M7).
+- **Phases Completed:** P0 (Triage), P1 (Entry Points), P2 (Time Windows/Alarms), P3 (Lock/Unlock/Fallbacks), P4 (Product Rules), P5 (Performance & Fault Tolerance: M4, M5, M6, M7).
 - **Open Issues:**
   - L1: Dead code in `LockCoordinator.onTick` & `DeviceDpmGateway.getAllFrozenPackages`.
   - L2: Duplicated unfreeze blocks in `LockCoordinator`; empty catch blocks in `MainActivity`.

@@ -8,6 +8,7 @@ import com.limiter.app.model.UsageEventRecord.EventType
 import com.limiter.app.time.TimeMath
 import com.limiter.app.time.TimeSource
 
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -20,11 +21,12 @@ import kotlinx.coroutines.withContext
  *
  * M4 Optimization: Narrowed from 48h to 3h because activities spanning midnight
  * begin in the late evening; querying 48h every poll tick created severe overhead.
- * All queries execute off the Main thread using Dispatchers.IO.
+ * All queries execute off the Main thread using ioDispatcher (defaults to Dispatchers.IO).
  */
 class UsageStatsReader(
     private val context: Context,
-    private val timeSource: TimeSource
+    private val timeSource: TimeSource,
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO
 ) {
 
     companion object {
@@ -48,7 +50,7 @@ class UsageStatsReader(
      * Returns foreground milliseconds for the package today.
      * Runs off the Main thread on Dispatchers.IO.
      */
-    suspend fun readTodayUsageMillis(packageName: String): Long = withContext(Dispatchers.IO) {
+    suspend fun readTodayUsageMillis(packageName: String): Long = withContext(ioDispatcher) {
         val nowMillis = timeSource.nowMillis()
         val zone = timeSource.zone()
         val midnightMillis = TimeMath.localMidnightMillis(nowMillis, zone)
@@ -61,9 +63,9 @@ class UsageStatsReader(
     /**
      * Read usage events once for all specified packages and calculate foreground millis.
      * Avoids querying the event window multiple times on each monitor tick.
-     * Runs off the Main thread on Dispatchers.IO.
+     * Runs off the Main thread on ioDispatcher.
      */
-    suspend fun readTodayUsageMillisBatch(packageNames: Set<String>): Map<String, Long> = withContext(Dispatchers.IO) {
+    suspend fun readTodayUsageMillisBatch(packageNames: Set<String>): Map<String, Long> = withContext(ioDispatcher) {
         if (packageNames.isEmpty()) return@withContext emptyMap()
         val nowMillis = timeSource.nowMillis()
         val zone = timeSource.zone()

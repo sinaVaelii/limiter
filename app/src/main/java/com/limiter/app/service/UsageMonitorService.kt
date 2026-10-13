@@ -145,7 +145,7 @@ class UsageMonitorService : LifecycleService() {
 
                 val allSnapshots = mutableMapOf<String, UsageSnapshot.Available>()
                 val usageMap = reader.readTodayUsageMillisBatch(targets.keys)
-                var anyLimitReached = false
+                var needsReschedule = false
 
                 for ((pkg, config) in targets) {
                     val usedMillis = usageMap[pkg] ?: 0L
@@ -165,10 +165,10 @@ class UsageMonitorService : LifecycleService() {
                         minRemaining = remainingMillis
                     }
 
-                    // 5. Check limit: usedMillis >= limitMinutes * 60_000L
+                    // 5. Check limit: usedMillis >= limitMillis
                     if (usedMillis >= limitMillis) {
                         callback?.onLimitReached(pkg, usedMillis)
-                        anyLimitReached = true
+                        needsReschedule = true
                     }
                 }
 
@@ -181,7 +181,7 @@ class UsageMonitorService : LifecycleService() {
                     app.lockCoordinator?.reconcile()
                 }
 
-                if (anyLimitReached || reconciled) {
+                if (needsReschedule || reconciled) {
                     app.timeWindowScheduler?.rescheduleIfPlanChanged()
                 }
 

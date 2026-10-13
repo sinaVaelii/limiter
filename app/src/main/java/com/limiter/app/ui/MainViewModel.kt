@@ -88,6 +88,7 @@ class MainViewModel(
     private val systemStatusChecker: SystemStatusChecker? = null,
     private val timeWindowScheduler: TimeWindowScheduler? = null,
     private val ioDispatcher: kotlinx.coroutines.CoroutineDispatcher = kotlinx.coroutines.Dispatchers.IO,
+    private val defaultDispatcher: kotlinx.coroutines.CoroutineDispatcher = kotlinx.coroutines.Dispatchers.Default,
     private val context: Context? = null
 ) : ViewModel() {
 
@@ -103,34 +104,40 @@ class MainViewModel(
     private val _systemStatus = MutableStateFlow(SystemStatus())
 
     init {
-        viewModelScope.launch(ioDispatcher) {
+        viewModelScope.launch(defaultDispatcher) {
             refreshSystemStatusInternal()
         }
     }
 
-    private suspend fun refreshProtectedPackages() {
+    private suspend fun refreshProtectedPackagesInternal() = kotlinx.coroutines.withContext(defaultDispatcher) {
         try {
             _cachedProtectedPackages.value = criticalPackageResolver?.resolveProtected() ?: emptySet()
         } catch (_: Exception) {}
+    }
+
+    fun refreshProtectedPackages() {
+        viewModelScope.launch(defaultDispatcher) {
+            refreshProtectedPackagesInternal()
+        }
     }
 
     fun tickCurrentTime() {
         _currentMillis.value = timeSource.nowMillis()
     }
 
-    private suspend fun refreshSystemStatusInternal() {
+    private suspend fun refreshSystemStatusInternal() = kotlinx.coroutines.withContext(defaultDispatcher) {
         try {
             criticalPackageResolver?.invalidateCache()
             val status = systemStatusChecker?.checkStatus()
                 ?: SystemStatus(isDeviceOwner = dpmGateway.isDeviceOwner())
             _systemStatus.value = status
-            refreshProtectedPackages()
+            refreshProtectedPackagesInternal()
         } catch (_: Exception) {}
     }
 
     fun refreshSystemStatus() {
         _currentMillis.value = timeSource.nowMillis()
-        viewModelScope.launch(ioDispatcher) {
+        viewModelScope.launch(defaultDispatcher) {
             refreshSystemStatusInternal()
         }
     }
@@ -399,18 +406,19 @@ class MainViewModel(
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
             return MainViewModel(
-                app.dpmGateway,
-                app.settingsRepository,
-                app.lockStateStore,
-                app.usageSnapshotStore,
-                app.timeSource,
-                app.lockCoordinator,
-                app.appDiscoveryRepository,
-                app.criticalPackageResolver,
-                app.systemStatusChecker,
-                app.timeWindowScheduler,
-                kotlinx.coroutines.Dispatchers.IO,
-                app
+                dpmGateway = app.dpmGateway,
+                settingsRepository = app.settingsRepository,
+                lockStateStore = app.lockStateStore,
+                usageSnapshotStore = app.usageSnapshotStore,
+                timeSource = app.timeSource,
+                lockCoordinator = app.lockCoordinator,
+                appDiscoveryRepository = app.appDiscoveryRepository,
+                criticalPackageResolver = app.criticalPackageResolver,
+                systemStatusChecker = app.systemStatusChecker,
+                timeWindowScheduler = app.timeWindowScheduler,
+                ioDispatcher = kotlinx.coroutines.Dispatchers.IO,
+                defaultDispatcher = kotlinx.coroutines.Dispatchers.Default,
+                context = app
             ) as T
         }
     }
