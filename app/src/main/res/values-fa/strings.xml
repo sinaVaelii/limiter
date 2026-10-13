@@ -80,4 +80,9 @@
     <string name="self_lock_add_confirmation_title">افزودن برنامه در زمان قفل خودکار</string>
     <string name="self_lock_view_dashboard">مشاهده داشبورد</string>
     <string name="self_lock_controls_locked">رابط مدیریت در طول بازه محدودیت قفل است</string>
+
+    <!-- P5 دکمه جابجایی برنامه‌های سیستمی -->
+    <string name="show_system_apps">نمایش برنامه‌های سیستمی</string>
+    <string name="show_system_apps_confirm_title">نمایش برنامه‌های سیستمی؟</string>
+    <string name="show_system_apps_confirm_msg">برنامه‌های سیستمی می‌توانند بر عملکرد دستگاه تأثیر بگذارند. برنامه‌های حیاتی همچنان محافظت می‌شوند، اما در محدودسازی سایر برنامه‌ها احتیاط کنید.</string>
 </resources>

@@ -53,6 +53,7 @@ data class MainUiState(
     val isLoadingApps: Boolean = false,
     val searchQuery: String = "",
     val selectedPackages: Set<String> = emptySet(),
+    val showSystemApps: Boolean = false,
     val batchResult: BatchResult? = null,
     val feedbackMessage: String? = null,
     val selfLockStatus: SelfLockPolicy.SelfLockStatus = SelfLockPolicy.SelfLockStatus(false),
@@ -71,6 +72,7 @@ private data class PickerState(
     val isLoadingApps: Boolean,
     val searchQuery: String,
     val selectedPackages: Set<String>,
+    val showSystemApps: Boolean,
     val batchResult: BatchResult?
 )
 
@@ -93,17 +95,16 @@ class MainViewModel(
     private val _isLoadingApps = MutableStateFlow(false)
     private val _searchQuery = MutableStateFlow("")
     private val _selectedPackages = MutableStateFlow<Set<String>>(emptySet())
+    private val _showSystemApps = MutableStateFlow(false)
     private val _batchResult = MutableStateFlow<BatchResult?>(null)
     private val _feedbackMessage = MutableStateFlow<String?>(null)
     private val _currentMillis = MutableStateFlow(timeSource.nowMillis())
     private val _cachedProtectedPackages = MutableStateFlow<Set<String>>(emptySet())
-    private val _systemStatus = MutableStateFlow(
-        systemStatusChecker?.checkStatus() ?: SystemStatus(isDeviceOwner = dpmGateway.isDeviceOwner())
-    )
+    private val _systemStatus = MutableStateFlow(SystemStatus())
 
     init {
         viewModelScope.launch(ioDispatcher) {
-            refreshProtectedPackages()
+            refreshSystemStatusInternal()
         }
     }
 
@@ -117,15 +118,20 @@ class MainViewModel(
         _currentMillis.value = timeSource.nowMillis()
     }
 
+    private suspend fun refreshSystemStatusInternal() {
+        try {
+            criticalPackageResolver?.invalidateCache()
+            val status = systemStatusChecker?.checkStatus()
+                ?: SystemStatus(isDeviceOwner = dpmGateway.isDeviceOwner())
+            _systemStatus.value = status
+            refreshProtectedPackages()
+        } catch (_: Exception) {}
+    }
+
     fun refreshSystemStatus() {
         _currentMillis.value = timeSource.nowMillis()
         viewModelScope.launch(ioDispatcher) {
-            try {
-                val status = systemStatusChecker?.checkStatus()
-                    ?: SystemStatus(isDeviceOwner = dpmGateway.isDeviceOwner())
-                _systemStatus.value = status
-                refreshProtectedPackages()
-            } catch (_: Exception) {}
+            refreshSystemStatusInternal()
         }
     }
 
@@ -143,9 +149,9 @@ class MainViewModel(
             _isLoadingApps,
             _searchQuery,
             _selectedPackages,
-            _batchResult
-        ) { apps, loading, query, selected, batch ->
-            PickerState(apps, loading, query, selected, batch)
+            combine(_showSystemApps, _batchResult) { showSys, batch -> showSys to batch }
+        ) { apps, loading, query, selected, (showSys, batch) ->
+            PickerState(apps, loading, query, selected, showSys, batch)
         },
         _systemStatus,
         _currentMillis,
@@ -172,6 +178,7 @@ class MainViewModel(
             isLoadingApps = picker.isLoadingApps,
             searchQuery = picker.searchQuery,
             selectedPackages = picker.selectedPackages,
+            showSystemApps = picker.showSystemApps,
             batchResult = picker.batchResult,
             feedbackMessage = feedback,
             selfLockStatus = selfLock,
@@ -186,6 +193,13 @@ class MainViewModel(
         )
     )
 
+    fun setShowSystemApps(show: Boolean) {
+        if (_showSystemApps.value != show) {
+            _showSystemApps.value = show
+            loadAvailableApps()
+        }
+    }
+
     fun loadAvailableApps() {
         val repo = appDiscoveryRepository ?: return
         viewModelScope.launch {
@@ -193,7 +207,7 @@ class MainViewModel(
             try {
                 val isSelfLocked = uiState.value.selfLockStatus.isSelfLocked
                 val alreadyConfigured = if (isSelfLocked) emptySet() else settingsRepository.snapshotTargets().keys
-                val apps = repo.getEligibleApps(alreadyConfigured)
+                val apps = repo.getEligibleApps(alreadyConfigured, _showSystemApps.value)
                 _availableApps.value = apps
             } catch (e: Exception) {
                 _feedbackMessage.value = "Failed to load apps: ${e.message}"

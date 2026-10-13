@@ -235,6 +235,42 @@ class TimeWindowScheduler(
     var lastRescheduleReport: RescheduleReport? = null
         private set
 
+    data class SchedulePlan(
+        val hideMinutes: Map<String, Int>,
+        val unlockTriggerMillis: Long?,
+        val unlockRequestCode: Int?,
+        val midnightMillis: Long
+    )
+
+    private var lastSchedulePlan: SchedulePlan? = null
+
+    /**
+     * Reschedules alarms only if the target set, hide windows, unlock/retry deadline, or midnight
+     * has changed since the last successful reschedule, or if the previous reschedule encountered errors.
+     * Prevents calling AlarmManager repeatedly on every monitor loop tick when nothing changed.
+     */
+    suspend fun rescheduleIfPlanChanged(): RescheduleReport? {
+        val now = timeSource.nowMillis()
+        val zone = timeSource.zone()
+        val targets = settingsRepository.snapshotTargets()
+        val lockRecords = lockStateStore.snapshot()
+        val unlockPlan = calculateEarliestUnlockPlan(lockRecords.values, now)
+        val nextMidnight = TimeMath.nextLocalMidnightMillis(now, zone)
+
+        val currentPlan = SchedulePlan(
+            hideMinutes = targets.mapValues { it.value.hideAtMinuteOfDay },
+            unlockTriggerMillis = unlockPlan?.triggerMillis,
+            unlockRequestCode = unlockPlan?.requestCode,
+            midnightMillis = nextMidnight
+        )
+
+        val lastReport = lastRescheduleReport
+        if (currentPlan == lastSchedulePlan && lastReport != null && !lastReport.hasAnyFailures) {
+            return null
+        }
+        return reschedule()
+    }
+
     /**
      * Reschedule all alarms based on current state.
      * Called after reconciliation and system events.
@@ -299,6 +335,12 @@ class TimeWindowScheduler(
             midnightAlarm = midnightResult
         )
         lastRescheduleReport = report
+        lastSchedulePlan = SchedulePlan(
+            hideMinutes = targets.mapValues { it.value.hideAtMinuteOfDay },
+            unlockTriggerMillis = unlockPlan?.triggerMillis,
+            unlockRequestCode = unlockPlan?.requestCode,
+            midnightMillis = nextMidnight
+        )
         return report
     }
 
@@ -319,6 +361,7 @@ class TimeWindowScheduler(
             cancelHideAlarm(pkg)
         }
         scheduledHideWindows.clear()
+        lastSchedulePlan = null
     }
 
     /**

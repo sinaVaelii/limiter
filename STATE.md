@@ -1,20 +1,17 @@
 # Limiter State Tracker
 
-- **Current Phase:** P4 completed | **Commit:** `28f79cd`
+- **Current Phase:** P5 completed | **Commit:** `43b9c8c`
 - **Decisions:**
   - D1: Baseline `compileSdk=targetSdk=minSdk=34`; test device runs Android 15 (API 35).
-  - D2: `UsageMonitorService` may invoke `LockCoordinator.reconcile()` when lock/retry is due.
+  - D2: `UsageMonitorService` invokes `LockCoordinator.reconcile()` when lock/retry is due.
   - D3: `SCHEDULE_EXACT_ALARM` appops permission authorized for granting in P2.
   - D4: Clock tampering (H7) options documented in triage; no code changes.
   - D5: Max daily limit 720m, max raise +30m, self-lock allows viewing & adding targets.
-- **Phases Completed:** P0 (Triage), P1 (Entry Points), P2 (Time Windows & Alarms), P3 (Lock/Unlock & Fallbacks), P4 (Product Rules: Limits 720m/+30m, Self-Lock Gate, H2).
+- **Phases Completed:** P0 (Triage), P1 (Entry Points), P2 (Time Windows/Alarms), P3 (Lock/Unlock/Fallbacks), P4 (Product Rules), P5 (Perf & Tolerance: M4, M5, M6, M7).
 - **Open Issues:**
-  - M4: `UsageStatsReader` queries 48h lookback per tick.
-  - M5: `checkStatus()` runs in `MainViewModel` property init on Main thread.
-  - M7: System apps toggle in app picker missing (resolver supports launchable system apps).
   - L1: Dead code in `LockCoordinator.onTick` & `DeviceDpmGateway.getAllFrozenPackages`.
   - L2: Duplicated unfreeze blocks in `LockCoordinator`; empty catch blocks in `MainActivity`.
-  - L3: Hard-coded English feedback strings in `MainViewModel` (partially addressed in P4).
+  - L3: Hard-coded English feedback strings in `MainViewModel`.
   - B5: Stale Stage 1 comment in `device_admin.xml`.
   - B6: Dead `Build.VERSION.SDK_INT >= Build.VERSION_CODES.S` check in `Theme.kt`.
   - D1: README test count & documentation divergence.

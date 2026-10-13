@@ -48,6 +48,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -125,6 +126,7 @@ fun LimiterScreen(viewModel: MainViewModel) {
                 onTogglePackage = { viewModel.togglePackageSelection(it) },
                 onSelectAll = { viewModel.selectAllEligible(it) },
                 onClearSelections = { viewModel.clearSelections() },
+                onToggleShowSystemApps = { viewModel.setShowSystemApps(it) },
                 onDismiss = { showAppPicker = false },
                 onProceedToConfigure = {
                     showAppPicker = false
@@ -319,6 +321,7 @@ fun LimiterScreen(viewModel: MainViewModel) {
             onTogglePackage = { viewModel.togglePackageSelection(it) },
             onSelectAll = { filtered -> viewModel.selectAllEligible(filtered) },
             onClearSelections = { viewModel.clearSelections() },
+            onToggleShowSystemApps = { viewModel.setShowSystemApps(it) },
             onDismiss = {
                 showAppPicker = false
                 viewModel.clearSelections()
@@ -861,8 +864,34 @@ fun AppPickerDialog(
     onSelectAll: (List<DiscoveredApp>) -> Unit,
     onClearSelections: () -> Unit,
     onDismiss: () -> Unit,
-    onProceedToConfigure: () -> Unit
+    onProceedToConfigure: () -> Unit,
+    onToggleShowSystemApps: (Boolean) -> Unit = {}
 ) {
+    var showSystemConfirmDialog by remember { mutableStateOf(false) }
+
+    if (showSystemConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showSystemConfirmDialog = false },
+            title = { Text(stringResource(R.string.show_system_apps_confirm_title)) },
+            text = { Text(stringResource(R.string.show_system_apps_confirm_msg)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showSystemConfirmDialog = false
+                        onToggleShowSystemApps(true)
+                    }
+                ) {
+                    Text(stringResource(R.string.confirm))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSystemConfirmDialog = false }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            }
+        )
+    }
+
     val filteredApps = remember(state.availableApps, state.searchQuery) {
         val q = state.searchQuery.trim().lowercase()
         if (q.isEmpty()) {
@@ -920,6 +949,32 @@ fun AppPickerDialog(
                     },
                     singleLine = true
                 )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Show System Apps Toggle
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = stringResource(R.string.show_system_apps),
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Switch(
+                        checked = state.showSystemApps,
+                        onCheckedChange = { isChecked ->
+                            if (isChecked) {
+                                showSystemConfirmDialog = true
+                            } else {
+                                onToggleShowSystemApps(false)
+                            }
+                        }
+                    )
+                }
 
                 Spacer(modifier = Modifier.height(8.dp))
 

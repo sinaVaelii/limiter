@@ -21,7 +21,27 @@ class DeviceCriticalPackageResolver(
     private val context: Context
 ) : CriticalPackageResolver {
 
+    @Volatile
+    private var cachedProtected: Set<String>? = null
+    private val cacheLock = Any()
+
     override fun resolveProtected(): Set<String> {
+        val cached = cachedProtected
+        if (cached != null) return cached
+        synchronized(cacheLock) {
+            val cachedInner = cachedProtected
+            if (cachedInner != null) return cachedInner
+            val resolved = doResolveProtected()
+            cachedProtected = resolved
+            return resolved
+        }
+    }
+
+    override fun invalidateCache() {
+        cachedProtected = null
+    }
+
+    private fun doResolveProtected(): Set<String> {
         val pm = context.packageManager
         val protected = mutableSetOf<String>()
 
@@ -126,7 +146,10 @@ class DeviceCriticalPackageResolver(
         return protected
     }
 
-    override fun isEligibleTarget(packageName: String): Boolean {
+    override fun isEligibleTarget(packageName: String): Boolean =
+        isEligibleTarget(packageName, allowSystemApps = false)
+
+    override fun isEligibleTarget(packageName: String, allowSystemApps: Boolean): Boolean {
         // Essential recovery and protected packages are strictly NEVER eligible targets
         if (packageName in resolveProtected()) {
             return false
@@ -139,20 +162,17 @@ class DeviceCriticalPackageResolver(
                 return false
             }
 
-            val isUserApp = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) == 0
-            val isUpdatedSystemApp = (appInfo.flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
-
-            if (isUserApp || isUpdatedSystemApp) {
-                true
-            } else {
-                // Pre-installed system app (e.g. Chrome, YouTube):
-                // Eligible only if it exposes a user-launchable launcher activity and is not protected
-                val launcherIntent = Intent(Intent.ACTION_MAIN)
-                    .addCategory(Intent.CATEGORY_LAUNCHER)
-                    .setPackage(packageName)
-                val activities = pm.queryIntentActivities(launcherIntent, 0)
-                activities.isNotEmpty()
+            val isSystem = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0
+            if (isSystem && !allowSystemApps) {
+                return false
             }
+
+            // Must expose a user-launchable activity
+            val launcherIntent = Intent(Intent.ACTION_MAIN)
+                .addCategory(Intent.CATEGORY_LAUNCHER)
+                .setPackage(packageName)
+            val activities = pm.queryIntentActivities(launcherIntent, 0)
+            activities.isNotEmpty()
         } catch (_: PackageManager.NameNotFoundException) {
             false
         } catch (_: Exception) {
@@ -162,7 +182,11 @@ class DeviceCriticalPackageResolver(
     }
 
     private fun resolveDefaultActivity(pm: PackageManager, intent: Intent): String? {
-        val resolveInfo = pm.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY)
+        val resolveInfo = try {
+            pm.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY)
+        } catch (_: Exception) {
+            null
+        }
         return resolveInfo?.activityInfo?.packageName
     }
 }

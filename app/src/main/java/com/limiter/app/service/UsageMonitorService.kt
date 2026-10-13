@@ -182,7 +182,7 @@ class UsageMonitorService : LifecycleService() {
                 }
 
                 if (anyLimitReached || reconciled) {
-                    app.timeWindowScheduler?.reschedule()
+                    app.timeWindowScheduler?.rescheduleIfPlanChanged()
                 }
 
                 // Successful poll cycle: reset consecutive failure count

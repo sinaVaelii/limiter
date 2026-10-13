@@ -54,17 +54,37 @@ class UsageSnapshotStore(
         }
     }
 
+    companion object {
+        private fun safeLogW(msg: String, tr: Throwable? = null) {
+            try {
+                if (tr != null) android.util.Log.w("Limiter", msg, tr) else android.util.Log.w("Limiter", msg)
+            } catch (_: Throwable) {
+                System.err.println("Limiter: $msg")
+            }
+        }
+    }
+
     internal fun decodeSnapshots(raw: String): Map<String, UsageSnapshot.Available> {
         if (raw.isBlank()) return emptyMap()
         return raw.lines().filter { it.isNotBlank() }.mapNotNull { line ->
             try {
                 val parts = line.split("|")
-                if (parts.size != 4) return@mapNotNull null
+                if (parts.size != 4) {
+                    safeLogW("Skipping corrupt usage snapshot line (expected 4 fields): $line")
+                    return@mapNotNull null
+                }
                 val pkg = parts[0].trim()
-                if (pkg.isBlank()) return@mapNotNull null
+                if (pkg.isBlank()) {
+                    safeLogW("Skipping corrupt usage snapshot line (empty package): $line")
+                    return@mapNotNull null
+                }
                 val used = parts[1].toLong()
                 val remaining = parts[2].toLong()
                 val limit = parts[3].toInt()
+                if (used < 0 || remaining < 0 || limit <= 0) {
+                    safeLogW("Skipping corrupt usage snapshot line (invalid used/remaining/limit): $line")
+                    return@mapNotNull null
+                }
                 val snapshot = UsageSnapshot.Available(
                     packageName = pkg,
                     usedMillis = used,
@@ -72,7 +92,8 @@ class UsageSnapshotStore(
                     limitMinutes = limit
                 )
                 pkg to snapshot
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                safeLogW("Skipping corrupt usage snapshot line: $line ($e)")
                 null
             }
         }.toMap()

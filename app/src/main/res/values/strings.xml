@@ -79,4 +79,9 @@
     <string name="self_lock_add_confirmation_title">Add Target During Self-Lock</string>
     <string name="self_lock_view_dashboard">View Dashboard</string>
     <string name="self_lock_controls_locked">Management controls are locked during active restriction window</string>
+
+    <!-- P5 System Apps Toggle -->
+    <string name="show_system_apps">Show system apps</string>
+    <string name="show_system_apps_confirm_title">Show System Apps?</string>
+    <string name="show_system_apps_confirm_msg">System apps can affect device operation. Essential system apps remain protected, but use caution when limiting other system apps.</string>
 </resources>

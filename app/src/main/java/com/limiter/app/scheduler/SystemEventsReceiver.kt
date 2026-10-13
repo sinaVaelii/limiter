@@ -96,6 +96,16 @@ class SystemEventsReceiver : BroadcastReceiver() {
                                 scheduler?.cancelAll()
                             }
 
+                            // Invalidate cached critical packages on package events
+                            if (action == Intent.ACTION_MY_PACKAGE_REPLACED ||
+                                action == Intent.ACTION_PACKAGE_ADDED ||
+                                action == Intent.ACTION_PACKAGE_REMOVED ||
+                                action == Intent.ACTION_PACKAGE_REPLACED ||
+                                action == Intent.ACTION_PACKAGE_CHANGED
+                            ) {
+                                (context?.applicationContext as? com.limiter.app.LimiterApp)?.criticalPackageResolver?.invalidateCache()
+                            }
+
                             // Reconcile and reschedule
                             coordinator.reconcile()
                             scheduler?.reschedule()
