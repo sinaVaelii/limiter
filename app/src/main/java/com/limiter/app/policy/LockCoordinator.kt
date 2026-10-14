@@ -18,7 +18,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 /**
- * LockCoordinator per AGENTS.md §28-37.
+ * LockCoordinator.
  *
  * This is the authoritative lock transition boundary.
  * Only LockCoordinator owns AppFreezerApi.
@@ -73,7 +73,7 @@ class LockCoordinator(
     }
 
     /**
-     * Full reconciliation per AGENTS.md §30-36.
+     * Full reconciliation.
      *
      * Idempotent. Reconciles desired state + persisted state + actual DPM state.
      */
@@ -83,7 +83,6 @@ class LockCoordinator(
 
     /**
      * Called by the monitor service when a package's daily limit is reached.
-     * Per AGENTS.md §37.
      */
     override suspend fun onLimitReached(packageName: String, usedMillis: Long) {
         mutex.withLock {
@@ -302,7 +301,7 @@ class LockCoordinator(
             }
         }
 
-        // Phase D.5 — Repair Active Locks (§31)
+        // Phase D.5 — Repair Active Locks
         for (pkg in recoverySet.toSet()) {
             if (!gateway.isPackageInstalled(pkg)) continue
             val record = lockRecords[pkg] ?: continue
@@ -339,7 +338,7 @@ class LockCoordinator(
             }
         }
 
-        // Phase E — Apply Pending Changes AFTER Unlock (§32)
+        // Phase E — Apply Pending Changes AFTER Unlock
         val todayEpochDay = TimeMath.localEpochDay(now, zone)
         // Re-read lock records since some may have been unlocked
         val currentLockStates = lockRecords.mapValues { (_, record) -> record.state }
@@ -385,7 +384,7 @@ class LockCoordinator(
         // Recalculate effective targets after pending changes
         val effectiveTargets = settingsRepository.snapshotTargets()
 
-        // Phase F — New Scheduled Window Locks (§33)
+        // Phase F — New Scheduled Window Locks
         for ((pkg, config) in effectiveTargets) {
             if (!gateway.isPackageInstalled(pkg)) continue
             val record = lockRecords[pkg]
@@ -419,7 +418,7 @@ class LockCoordinator(
             }
         }
 
-        // Phase G — Orphan physical freeze recovery (§35)
+        // Phase G — Orphan physical freeze recovery
         for (pkg in recoverySet.toSet()) {
             if (!gateway.isPackageInstalled(pkg)) continue
             val record = lockRecords[pkg]
@@ -466,7 +465,7 @@ class LockCoordinator(
             }
         }
 
-        // Phase H — Protected transition (§36)
+        // Phase H — Protected transition
         for (pkg in recoverySet.toSet()) {
             if (!gateway.isPackageInstalled(pkg)) continue
             if (pkg !in protectedPkgs) continue
@@ -481,14 +480,14 @@ class LockCoordinator(
             }
         }
 
-        // Enforce self-protection policies (§24, §45)
+        // Enforce self-protection policies
         val selfProtection = enforceSelfProtection()
 
         return ReconcileResult.Ok(events, selfProtection)
     }
 
     /**
-     * onLimitReached per AGENTS.md §37.
+     * onLimitReached implementation.
      */
     @Suppress("UNUSED_PARAMETER")
     private suspend fun onLimitReachedInternal(packageName: String, usedMillis: Long) {
@@ -534,7 +533,7 @@ class LockCoordinator(
             }
         }
 
-        // Calculate lock-until per §34
+        // Calculate lock-until (at least until next reveal or midnight)
         val nextReveal = TimeMath.nextOccurrence(now, zone, config.revealAtMinuteOfDay)
         val nextMidnight = TimeMath.nextLocalMidnightMillis(now, zone)
         val until = maxOf(nextReveal, nextMidnight)
@@ -551,7 +550,7 @@ class LockCoordinator(
     }
 
     /**
-     * Enforce Device Owner policies on Limiter itself per §24 and §45.
+     * Enforce Device Owner policies on Limiter itself.
      */
     fun enforceSelfProtection(): SelfProtectionResult {
         if (!gateway.isDeviceOwner()) return SelfProtectionResult.NotDeviceOwner
@@ -576,8 +575,7 @@ class LockCoordinator(
     }
 
     /**
-     * Check if the current time is inside the configured lock window.
-     * Per §33 window semantics:
+     * Check if the current time is inside the configured lock window:
      *   hideAt < revealAt: [hideAt, revealAt)
      *   hideAt > revealAt: [hideAt, 1440) OR [0, revealAt)
      */
@@ -588,7 +586,7 @@ class LockCoordinator(
     ): Boolean = SelfLockPolicy.isInsideWindow(config, nowMillis, zone)
 
     /**
-     * Submit a configuration edit per §38.
+     * Submit a configuration edit.
      * Enforces self-lock policy at the authoritative mutation boundary within the single mutex.
      */
     suspend fun tryEditConfig(config: TargetAppConfig): com.limiter.app.policy.SettingsPolicy.EditResult = mutex.withLock {

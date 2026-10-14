@@ -4,9 +4,9 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 /**
- * Stage 1 — trivial JVM test to verify the build pipeline works.
+ * Basic JVM test to verify the test pipeline works.
  */
-class Stage1SanityTest {
+class SanityTest {
 
     @Test
     fun `application id is correct`() {

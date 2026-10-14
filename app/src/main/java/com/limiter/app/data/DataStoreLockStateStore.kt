@@ -10,9 +10,9 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
 /**
- * DataStore-backed [LockStateStore] per AGENTS.md §27.
+ * DataStore-backed [LockStateStore].
  *
- * Retry backoff sequence (§ Retry):
+ * Retry backoff sequence:
  *   30s, 1m, 2m, 5m, 10m, 15m, 30m max
  */
 class DataStoreLockStateStore(
@@ -21,7 +21,7 @@ class DataStoreLockStateStore(
 
     companion object {
         /**
-         * Retry backoff intervals in millis per AGENTS.md.
+         * Retry backoff intervals in millis.
          */
         val RETRY_BACKOFF_MILLIS = longArrayOf(
             30_000L,         // 30 seconds
@@ -154,7 +154,7 @@ class DataStoreLockStateStore(
             val nextRetry = now + backoffMs
 
             val newState = when (val state = existing.state) {
-                is LockState.LockedUntil -> state // Retain LockedUntil per §30
+                is LockState.LockedUntil -> state // Retain LockedUntil until explicitly unlocked
                 is LockState.ReleasePending -> state.copy(
                     visibilityRestored = visibilityRestored,
                     unsuspensionRestored = unsuspensionRestored

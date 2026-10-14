@@ -29,7 +29,7 @@ interface AppDiscoveryRepository {
 /**
  * Production implementation using PackageManager and CriticalPackageResolver.
  *
- * Uses only legitimate launcher-intent queries per AGENTS.md §51 without QUERY_ALL_PACKAGES.
+ * Uses only legitimate launcher-intent queries without QUERY_ALL_PACKAGES.
  */
 class DeviceAppDiscoveryRepository(
     private val context: Context,

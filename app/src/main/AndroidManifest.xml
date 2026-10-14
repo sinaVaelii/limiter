@@ -2,7 +2,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Stage 2 permissions -->
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS"
         tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
@@ -71,12 +70,12 @@
             android:exported="false"
             android:foregroundServiceType="systemExempted" />
 
-        <!-- Stage 3: Alarm receiver -->
+        <!-- Alarm receiver -->
         <receiver
             android:name=".scheduler.AlarmReceiver"
             android:exported="false" />
 
-        <!-- Stage 3: System events receiver (§43) -->
+        <!-- System events receiver -->
         <receiver
             android:name=".scheduler.SystemEventsReceiver"
             android:exported="true">

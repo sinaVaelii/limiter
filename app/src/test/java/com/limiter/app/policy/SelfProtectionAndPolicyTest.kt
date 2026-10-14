@@ -25,11 +25,10 @@ import java.time.ZoneId
 import java.time.ZonedDateTime
 
 /**
- * Stage R3 tests for self-protection, safe device policy, and protected package invariants
- * per AGENTS.md §24, §45, §46, and Section C (R3).
+ * Tests for self-protection, safe device policy, and protected package invariants.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
-class R3SelfProtectionAndPolicyTest {
+class SelfProtectionAndPolicyTest {
 
     @get:Rule
     val tempFolder = TemporaryFolder()
@@ -101,7 +100,7 @@ class R3SelfProtectionAndPolicyTest {
     }
 
     // =======================================================================
-    // 1. Targeted Self-Protection Enforcement (§24, §45, §C R3)
+    // 1. Targeted Self-Protection Enforcement
     // =======================================================================
 
     @Test
@@ -165,7 +164,7 @@ class R3SelfProtectionAndPolicyTest {
     }
 
     // =======================================================================
-    // 2. Protected Packages Safety & Transitions (§36, §46, §C R3)
+    // 2. Protected Packages Safety & Transitions
     // =======================================================================
 
     @Test
@@ -237,7 +236,7 @@ class R3SelfProtectionAndPolicyTest {
         // At 12:00, lock is active
         coordinator.reconcile()
 
-        // MUST NOT unlock early merely because it became protected (§C R3 item 5)
+        // MUST NOT unlock early merely because it became protected
         assertTrue(gateway.hiddenPackages.contains(pkg))
         assertTrue(gateway.suspendedPackages.contains(pkg))
         val record = lockStateStore.snapshot()[pkg]
@@ -306,7 +305,7 @@ class R3SelfProtectionAndPolicyTest {
     }
 
     // =======================================================================
-    // 3. Explicit Recovery Boundary & Prohibitions (§B2, §24, §45)
+    // 3. Explicit Recovery Boundary & Prohibitions
     // =======================================================================
 
     @Test

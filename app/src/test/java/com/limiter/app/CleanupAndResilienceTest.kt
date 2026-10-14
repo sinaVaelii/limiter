@@ -35,11 +35,11 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * P7: JVM Unit Tests for Scheduler Cancellation, Watchdog Decision Logic,
+ * JVM Unit Tests for Scheduler Cancellation, Watchdog Decision Logic,
  * and Broadcast Receiver Completion Resilience.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
-class CleanupAndResilienceP7Test {
+class CleanupAndResilienceTest {
 
     @get:Rule
     val tempFolder = TemporaryFolder()

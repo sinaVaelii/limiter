@@ -36,7 +36,7 @@ import java.time.ZoneId
 import java.time.ZonedDateTime
 
 @OptIn(ExperimentalCoroutinesApi::class)
-class MainViewModelR4Test {
+class MainViewModelTest {
 
     @get:Rule
     val tempFolder = TemporaryFolder()

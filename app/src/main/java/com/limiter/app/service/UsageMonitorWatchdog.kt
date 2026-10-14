@@ -4,7 +4,7 @@ import com.limiter.app.model.LockRecord
 import com.limiter.app.model.LockState
 
 /**
- * Pure helper for monitoring loop watchdog per Stage R5 requirements.
+ * Pure helper for monitoring loop watchdog.
  * Detects when any persisted lock deadline or retry backoff timestamp has expired,
  * allowing UsageMonitorService to trigger reconciliation without direct DPM coupling.
  */

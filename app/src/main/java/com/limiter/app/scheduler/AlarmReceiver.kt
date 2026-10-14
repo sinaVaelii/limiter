@@ -11,7 +11,7 @@ import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Alarm receiver per AGENTS.md §42.
+ * Alarm receiver.
  *
  * Delegates to LockCoordinator — never directly mutates lock state.
  *

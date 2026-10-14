@@ -1,7 +1,7 @@
 package com.limiter.app.dpm
 
 /**
- * Fake [DpmGateway] for unit testing per AGENTS.md §46.
+ * Fake [DpmGateway] for unit testing.
  *
  * Simulates DPM state without Android framework dependencies.
  */

@@ -274,7 +274,7 @@ fun LimiterScreen(viewModel: MainViewModel) {
                 Spacer(modifier = Modifier.height(8.dp))
             }
 
-            // System Status Card (§49 Onboarding/Status)
+            // System Status Card
             StatusCard(state = state)
             Spacer(modifier = Modifier.height(16.dp))
 
@@ -360,7 +360,7 @@ fun LimiterScreen(viewModel: MainViewModel) {
                             nowMillis = state.currentMillis,
                             onEdit = {
                                 if (lockState is LockState.LockedUntil && state.currentMillis < lockState.untilEpochMillis) {
-                                    // Branch to LockedReadOnly per §52
+                                    // Branch to LockedReadOnly
                                     lockedReadOnlyTarget = pkg to lockState
                                 } else {
                                     editingTarget = pending?.desired ?: config ?: TargetAppConfig(pkg, 60, 1380, 420)
@@ -442,7 +442,7 @@ fun LimiterScreen(viewModel: MainViewModel) {
         )
     }
 
-    // 4. Locked Read-Only Dialog per §52
+    // 4. Locked Read-Only Dialog
     if (lockedReadOnlyTarget != null) {
         val (pkg, lockState) = lockedReadOnlyTarget!!
         LockedReadOnlyDialog(
@@ -644,7 +644,7 @@ fun SelfLockScreen(
 }
 
 /**
- * Onboarding and system status card per AGENTS.md §49 and P6 health row.
+ * Onboarding and system status card health row.
  */
 @Composable
 fun HealthChipsRow(
@@ -1171,7 +1171,7 @@ fun AppStatusCard(
 }
 
 /**
- * Read-only dialog shown when user inspects a locked application per AGENTS.md §52.
+ * Read-only dialog shown when user inspects a locked application.
  */
 @Composable
 fun LockedReadOnlyDialog(

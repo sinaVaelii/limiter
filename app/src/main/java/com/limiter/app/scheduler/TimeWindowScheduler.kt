@@ -15,7 +15,7 @@ import com.limiter.app.time.TimeSource
 import kotlinx.coroutines.flow.first
 
 /**
- * Alarm scheduler per AGENTS.md §38-42.
+ * Alarm scheduler.
  *
  * Schedules at most:
  *   - one next-hide alarm per effective target

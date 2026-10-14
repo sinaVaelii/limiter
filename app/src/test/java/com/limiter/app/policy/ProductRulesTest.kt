@@ -24,10 +24,10 @@ import java.time.ZoneId
 import java.time.ZonedDateTime
 
 /**
- * Comprehensive verification for Phase P4: Product rules for limits and self-lock (D5).
+ * Comprehensive verification of product rules for limits and self-lock.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
-class ProductRulesP4Test {
+class ProductRulesTest {
 
     @get:Rule
     val tempFolder = TemporaryFolder()

@@ -10,15 +10,15 @@ import com.limiter.app.admin.LimiterAdminReceiver
 /**
  * Production [DpmGateway] implementation.
  *
- * Owns all direct DevicePolicyManager interaction per AGENTS.md §21-23.
+ * Owns direct DevicePolicyManager interaction.
  *
- * Freeze order (§22):
+ * Freeze order:
  *   1. suspend
  *   2. verify suspended
  *   3. hide
  *   4. verify hidden
  *
- * Unfreeze order (§23):
+ * Unfreeze order:
  *   1. unhide
  *   2. verify hidden == false
  *   3. unsuspend

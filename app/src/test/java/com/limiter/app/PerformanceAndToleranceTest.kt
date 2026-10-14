@@ -30,16 +30,15 @@ import java.time.ZoneId
 import java.time.ZonedDateTime
 
 /**
- * Phase P5 tests verifying performance and tolerance requirements (M4, M5, M6, M7):
- * - M4: UsageStatsReader lookback window narrowed to 3h.
- *       TimeWindowScheduler plan caching: rescheduleIfPlanChanged() avoids redundant AlarmManager calls.
- * - M5: CriticalPackageResolver caching and invalidation contract.
- * - M6: UsageSnapshotStore tolerant decoding of corrupt and malformed snapshot lines.
- * - M7: CriticalPackageResolver system apps toggle: allows launchable non-protected system apps,
- *       while preserving strict protection for critical system apps and Limiter itself.
+ * Tests verifying performance and tolerance requirements:
+ * - Lookback window and plan caching avoiding redundant AlarmManager calls.
+ * - CriticalPackageResolver caching and invalidation contract.
+ * - UsageSnapshotStore tolerant decoding of corrupt and malformed snapshot lines.
+ * - CriticalPackageResolver system apps toggle: allows launchable non-protected system apps,
+ *   while preserving strict protection for critical system apps and Limiter itself.
  */
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
-class PerformanceAndToleranceP5Test {
+class PerformanceAndToleranceTest {
 
     @get:Rule
     val tempFolder = TemporaryFolder()

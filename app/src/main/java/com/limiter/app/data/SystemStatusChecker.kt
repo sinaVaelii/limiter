@@ -5,7 +5,7 @@ import android.os.Build
 import com.limiter.app.dpm.DpmGateway
 
 /**
- * Container for device system and permission status per AGENTS.md §49.
+ * Container for device system and permission status.
  */
 data class SystemStatus(
     val isDeviceOwner: Boolean = false,

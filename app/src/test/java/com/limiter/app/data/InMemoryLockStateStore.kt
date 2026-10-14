@@ -7,7 +7,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 
 /**
- * In-memory [LockStateStore] for unit testing per AGENTS.md §46.
+ * In-memory [LockStateStore] for unit testing.
  *
  * Implements the same retry backoff sequence as DataStoreLockStateStore.
  */
@@ -116,7 +116,7 @@ class InMemoryLockStateStore : LockStateStore {
             val nextRetry = now + backoffMs
 
             val newState = when (val state = existing.state) {
-                is LockState.LockedUntil -> state // Retain LockedUntil per §30
+                is LockState.LockedUntil -> state // Retain LockedUntil until explicitly unlocked
                 is LockState.ReleasePending -> state.copy(
                     visibilityRestored = visibilityRestored,
                     unsuspensionRestored = unsuspensionRestored

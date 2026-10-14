@@ -198,7 +198,7 @@ class RegressionFixesTest {
     }
 
     // =========================================================================
-    // 1. External Intent Trust Boundaries (Phase 1 / Section 4.1)
+    // 1. External Intent Trust Boundaries
     // =========================================================================
 
     @Test
@@ -270,7 +270,7 @@ class RegressionFixesTest {
     }
 
     // =========================================================================
-    // 2. Centralized Self-Lock Enforcement (Phase 1 / Section 4.2)
+    // 2. Centralized Self-Lock Enforcement
     // =========================================================================
 
     @Test
@@ -341,7 +341,7 @@ class RegressionFixesTest {
     }
 
     // =========================================================================
-    // 3. Lock Monotonicity and Preservation (Phase 1 / Section 4.3)
+    // 3. Lock Monotonicity and Preservation
     // =========================================================================
 
     @Test
@@ -409,7 +409,7 @@ class RegressionFixesTest {
     }
 
     // =========================================================================
-    // 5. Scheduler Reliability & Deterministic Request Codes (Phase 2 / Section 5.1)
+    // 5. Scheduler Reliability & Deterministic Request Codes
     // =========================================================================
 
     @Test
@@ -428,7 +428,7 @@ class RegressionFixesTest {
     }
 
     // =========================================================================
-    // 6. Usage Snapshot Corruption Tolerance (Phase 3 / Section 6.2)
+    // 6. Usage Snapshot Corruption Tolerance
     // =========================================================================
 
     @Test
@@ -463,7 +463,7 @@ class RegressionFixesTest {
     }
 
     // =========================================================================
-    // 7. Atomic Targets and Pending Updates (Phase 4 / Section 7)
+    // 7. Atomic Targets and Pending Updates
     // =========================================================================
 
     @Test
@@ -490,7 +490,7 @@ class RegressionFixesTest {
     }
 
     // =========================================================================
-    // 8. Uninstalled Package Pending Changes Cleanup (Phase 4 / Section 7)
+    // 8. Uninstalled Package Pending Changes Cleanup
     // =========================================================================
 
     @Test
@@ -518,7 +518,7 @@ class RegressionFixesTest {
     }
 
     // =========================================================================
-    // 9. Unknown Package State Invariant (Phase 1 / Prompt 1)
+    // 9. Unknown Package State Invariant
     // =========================================================================
 
     @Test
@@ -567,7 +567,7 @@ class RegressionFixesTest {
     }
 
     // =========================================================================
-    // 10. ReleasePending Scheduling and Retry (Phase 2 / Prompt 4)
+    // 10. ReleasePending Scheduling and Retry
     // =========================================================================
 
     @Test
@@ -613,7 +613,7 @@ class RegressionFixesTest {
     }
 
     // =========================================================================
-    // 11. Hide-Alarm Cancellation & Distinct Data Identity (Phase 2 / Prompt 4)
+    // 11. Hide-Alarm Cancellation & Distinct Data Identity
     // =========================================================================
 
     @Test
@@ -636,7 +636,7 @@ class RegressionFixesTest {
     }
 
     // =========================================================================
-    // 12. Monitor Loop Bounded Backoff (Phase 3 / Prompt 4)
+    // 12. Monitor Loop Bounded Backoff
     // =========================================================================
 
     @Test
@@ -652,7 +652,7 @@ class RegressionFixesTest {
     }
 
     // =========================================================================
-    // 13. External Intent Mutation Boundary (Phase 1 / Prompt 2)
+    // 13. External Intent Mutation Boundary
     // =========================================================================
 
     @Test

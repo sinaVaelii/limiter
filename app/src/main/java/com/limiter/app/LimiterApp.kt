@@ -68,7 +68,7 @@ class LimiterApp : Application() {
         com.limiter.app.data.DeviceSystemStatusChecker(this, dpmGateway, usageStatsReader)
     }
 
-    // ---- Stage 3 additions ----
+    // Core infrastructure and DPM bindings
 
     val dpmGateway: DpmGateway by lazy {
         DeviceDpmGateway(this)

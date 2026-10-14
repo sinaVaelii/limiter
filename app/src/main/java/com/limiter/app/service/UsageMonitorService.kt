@@ -72,7 +72,6 @@ class UsageMonitorService : LifecycleService() {
 
     /**
      * Callback interface for limit-reached events.
-     * Stage 2: no-op implementation. Stage 3 will wire this to LockCoordinator.
      */
     interface LimitReachedCallback {
         suspend fun onLimitReached(packageName: String, usedMillis: Long)

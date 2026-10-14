@@ -5,7 +5,7 @@ import org.junit.Before
 import org.junit.Test
 
 /**
- * Tests for AppFreezer per AGENTS.md §46.
+ * Tests for AppFreezer.
  *
  * Covers:
  * - suspend success + hide success -> Ok

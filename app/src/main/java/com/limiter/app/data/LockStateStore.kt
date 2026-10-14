@@ -5,7 +5,7 @@ import com.limiter.app.model.LockState
 import kotlinx.coroutines.flow.Flow
 
 /**
- * Persistence layer for lock records per AGENTS.md §27.
+ * Persistence layer for lock records.
  *
  * Rules:
  *   lockUntilAtLeast: never shortens

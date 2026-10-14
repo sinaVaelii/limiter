@@ -8,7 +8,7 @@ import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * System events receiver per AGENTS.md §43.
+ * System events receiver.
  *
  * Handles:
  *   BOOT_COMPLETED
@@ -110,7 +110,7 @@ class SystemEventsReceiver : BroadcastReceiver() {
                             coordinator.reconcile()
                             scheduler?.reschedule()
 
-                            // Ensure monitoring where allowed per AGENTS.md §43
+                            // Ensure monitoring where allowed
                             if (isDeviceOwner && context != null) {
                                 try {
                                     com.limiter.app.service.UsageMonitorService.start(context)

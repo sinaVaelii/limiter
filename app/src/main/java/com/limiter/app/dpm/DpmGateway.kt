@@ -1,7 +1,7 @@
 package com.limiter.app.dpm
 
 /**
- * Thin abstraction over DevicePolicyManager per AGENTS.md §21.
+ * Thin abstraction over DevicePolicyManager.
  *
  * The real implementation owns all direct DPM interaction.
  * Unit tests fake this interface.
