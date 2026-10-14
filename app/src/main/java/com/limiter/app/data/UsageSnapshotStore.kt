@@ -5,6 +5,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import com.limiter.app.model.UsageSnapshot
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
 /**
@@ -25,19 +26,91 @@ class UsageSnapshotStore(
         decodeSnapshots(raw)
     }
 
+    /** Retrieve the current stored day start millis (local midnight epoch millis). */
+    suspend fun getStoredDayStartMillis(): Long {
+        return dataStore.data.map { prefs ->
+            prefs[UsageSnapshotKeys.DAY_START_MILLIS] ?: 0L
+        }.first()
+    }
+
+    /** Retrieve current snapshot map synchronously from Flow. */
+    suspend fun getSnapshots(): Map<String, UsageSnapshot.Available> {
+        return snapshots.first()
+    }
+
     /** Publish a snapshot for a single package. */
-    suspend fun publish(snapshot: UsageSnapshot.Available) {
+    suspend fun publish(snapshot: UsageSnapshot.Available, dayStartMillis: Long = 0L) {
+        publishAll(mapOf(snapshot.packageName to snapshot), dayStartMillis)
+    }
+
+    /**
+     * Publish snapshots for multiple packages atomically.
+     * Enforces Monotonic Daily Usage (Anti-Reset):
+     * Within the same local calendar day (dayStartMillis), usage can NEVER decrease or reset.
+     */
+    suspend fun publishAll(
+        snapshots: Map<String, UsageSnapshot.Available>,
+        dayStartMillis: Long = 0L
+    ) {
         dataStore.edit { prefs ->
-            val current = decodeSnapshots(prefs[UsageSnapshotKeys.SNAPSHOTS] ?: "").toMutableMap()
-            current[snapshot.packageName] = snapshot
-            prefs[UsageSnapshotKeys.SNAPSHOTS] = encodeSnapshots(current)
+            val storedDayStart = prefs[UsageSnapshotKeys.DAY_START_MILLIS] ?: 0L
+            val existingSnapshots = decodeSnapshots(prefs[UsageSnapshotKeys.SNAPSHOTS] ?: "")
+
+            val merged = if (dayStartMillis > 0L && dayStartMillis == storedDayStart) {
+                // Same local calendar day: enforce monotonic usage (usage can NEVER decrease)
+                val result = existingSnapshots.toMutableMap()
+                for ((pkg, incoming) in snapshots) {
+                    val existing = existingSnapshots[pkg]
+                    if (existing != null) {
+                        val monotonicUsed = maxOf(existing.usedMillis, incoming.usedMillis)
+                        val limitMillis = incoming.limitMinutes * 60_000L
+                        val monotonicRemaining = (limitMillis - monotonicUsed).coerceAtLeast(0L)
+                        result[pkg] = incoming.copy(
+                            usedMillis = monotonicUsed,
+                            remainingMillis = monotonicRemaining
+                        )
+                    } else {
+                        result[pkg] = incoming
+                    }
+                }
+                result
+            } else if (dayStartMillis > 0L && dayStartMillis < storedDayStart) {
+                // Clock jumped backwards: do not allow reset, enforce monotonic usage
+                val result = existingSnapshots.toMutableMap()
+                for ((pkg, incoming) in snapshots) {
+                    val existing = existingSnapshots[pkg]
+                    if (existing != null) {
+                        val monotonicUsed = maxOf(existing.usedMillis, incoming.usedMillis)
+                        val limitMillis = incoming.limitMinutes * 60_000L
+                        val monotonicRemaining = (limitMillis - monotonicUsed).coerceAtLeast(0L)
+                        result[pkg] = incoming.copy(
+                            usedMillis = monotonicUsed,
+                            remainingMillis = monotonicRemaining
+                        )
+                    } else {
+                        result[pkg] = incoming
+                    }
+                }
+                result
+            } else {
+                // New day (dayStartMillis > storedDayStart) or unversioned caller (dayStartMillis == 0L)
+                if (dayStartMillis > 0L) {
+                    prefs[UsageSnapshotKeys.DAY_START_MILLIS] = dayStartMillis
+                }
+                snapshots
+            }
+
+            prefs[UsageSnapshotKeys.SNAPSHOTS] = encodeSnapshots(merged)
         }
     }
 
-    /** Publish snapshots for multiple packages atomically. */
-    suspend fun publishAll(snapshots: Map<String, UsageSnapshot.Available>) {
+    /** Clear a single package from snapshots. */
+    suspend fun clearPackage(packageName: String) {
         dataStore.edit { prefs ->
-            prefs[UsageSnapshotKeys.SNAPSHOTS] = encodeSnapshots(snapshots)
+            val current = decodeSnapshots(prefs[UsageSnapshotKeys.SNAPSHOTS] ?: "").toMutableMap()
+            if (current.remove(packageName) != null) {
+                prefs[UsageSnapshotKeys.SNAPSHOTS] = encodeSnapshots(current)
+            }
         }
     }
 

@@ -12,6 +12,7 @@ import androidx.lifecycle.lifecycleScope
 import com.limiter.app.LimiterApp
 import com.limiter.app.model.UsageSnapshot
 import com.limiter.app.policy.PollPlanner
+import com.limiter.app.time.TimeMath
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -143,12 +144,25 @@ class UsageMonitorService : LifecycleService() {
                 val targets = settingsRepo.snapshotTargets()
                 var minRemaining = Long.MAX_VALUE
 
+                val nowMillis = app.timeSource.nowMillis()
+                val zone = app.timeSource.zone()
+                val dayStartMillis = TimeMath.localMidnightMillis(nowMillis, zone)
+
                 val allSnapshots = mutableMapOf<String, UsageSnapshot.Available>()
                 val usageMap = reader.readTodayUsageMillisBatch(targets.keys)
+                val existingSnapshots = snapshotStore.getSnapshots()
+                val storedDayStart = snapshotStore.getStoredDayStartMillis()
                 var needsReschedule = false
 
                 for ((pkg, config) in targets) {
-                    val usedMillis = usageMap[pkg] ?: 0L
+                    val rawUsedMillis = usageMap[pkg] ?: 0L
+                    // Enforce Monotonic Daily Usage (Anti-Reset) within the same local calendar day
+                    val usedMillis = if (storedDayStart == dayStartMillis && existingSnapshots.containsKey(pkg)) {
+                        maxOf(rawUsedMillis, existingSnapshots[pkg]?.usedMillis ?: 0L)
+                    } else {
+                        rawUsedMillis
+                    }
+
                     val effectiveDailyLimitMinutes = minOf(config.dailyLimitMinutes, com.limiter.app.policy.SettingsPolicy.MAX_DAILY_LIMIT_MINUTES)
                     val limitMillis = effectiveDailyLimitMinutes * 60_000L
                     val remainingMillis = (limitMillis - usedMillis).coerceAtLeast(0)
@@ -172,11 +186,10 @@ class UsageMonitorService : LifecycleService() {
                     }
                 }
 
-                snapshotStore.publishAll(allSnapshots)
+                snapshotStore.publishAll(allSnapshots, dayStartMillis)
 
                 // 5.5. Watchdog check: reconcile and reschedule if any lock deadline or retry is due
                 val currentLockRecords = app.lockStateStore.snapshot()
-                val nowMillis = app.timeSource.nowMillis()
                 val reconciled = UsageMonitorWatchdog.reconcileIfDue(currentLockRecords, nowMillis) {
                     app.lockCoordinator.reconcile()
                 }

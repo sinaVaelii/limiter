@@ -3,6 +3,7 @@ package com.limiter.app.data
 import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 
@@ -37,6 +38,9 @@ object SettingsKeys {
 object UsageSnapshotKeys {
     /** JSON-encoded Map<String, UsageSnapshot.Available> */
     val SNAPSHOTS = stringPreferencesKey("usage_snapshots")
+
+    /** Local midnight timestamp (epoch millis) representing the calendar day of recorded usage */
+    val DAY_START_MILLIS = longPreferencesKey("day_start_millis")
 }
 
 /** Lock state store — persists lock records with retry metadata. */

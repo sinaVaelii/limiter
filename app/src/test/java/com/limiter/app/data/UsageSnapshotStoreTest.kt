@@ -90,4 +90,63 @@ class UsageSnapshotStoreTest {
         assertEquals(1200L, retrieved["com.app.a"]?.usedMillis)
         assertEquals(3000L, retrieved["com.app.b"]?.usedMillis)
     }
+
+    @Test
+    fun publishAll_withSameDayStart_enforcesMonotonicDailyUsage() = runTest(testDispatcher) {
+        val dayStart = 1792000000000L
+        val initialSnapshots = mapOf(
+            "com.app.a" to UsageSnapshot.Available("com.app.a", 3000L, 3000L, 1)
+        )
+        store.publishAll(initialSnapshots, dayStartMillis = dayStart)
+
+        // Attempt to publish lower usage within same day (e.g. 1000ms instead of 3000ms)
+        val lowerSnapshots = mapOf(
+            "com.app.a" to UsageSnapshot.Available("com.app.a", 1000L, 5000L, 1)
+        )
+        store.publishAll(lowerSnapshots, dayStartMillis = dayStart)
+
+        val retrieved = store.snapshots.first()
+        assertEquals("Usage must be monotonically non-decreasing within same day", 3000L, retrieved["com.app.a"]?.usedMillis)
+    }
+
+    @Test
+    fun publishAll_withNewDayStart_allowsFreshDayUsage() = runTest(testDispatcher) {
+        val day1 = 1792000000000L
+        val day2 = 1792086400000L // 24 hours later
+
+        val day1Snapshots = mapOf(
+            "com.app.a" to UsageSnapshot.Available("com.app.a", 3000L, 3000L, 1)
+        )
+        store.publishAll(day1Snapshots, dayStartMillis = day1)
+
+        // Next calendar day: fresh usage starts from 0 or low value
+        val day2Snapshots = mapOf(
+            "com.app.a" to UsageSnapshot.Available("com.app.a", 500L, 5500L, 1)
+        )
+        store.publishAll(day2Snapshots, dayStartMillis = day2)
+
+        val retrieved = store.snapshots.first()
+        assertEquals("New day allows fresh usage starting lower than yesterday", 500L, retrieved["com.app.a"]?.usedMillis)
+        assertEquals(day2, store.getStoredDayStartMillis())
+    }
+
+    @Test
+    fun publishAll_clockTamperBackwards_enforcesMonotonicUsage() = runTest(testDispatcher) {
+        val day2 = 1792086400000L
+        val day1 = 1792000000000L // clock set backwards
+
+        val initialSnapshots = mapOf(
+            "com.app.a" to UsageSnapshot.Available("com.app.a", 4000L, 2000L, 1)
+        )
+        store.publishAll(initialSnapshots, dayStartMillis = day2)
+
+        // Attempt reset by rolling clock back
+        val tamperSnapshots = mapOf(
+            "com.app.a" to UsageSnapshot.Available("com.app.a", 0L, 6000L, 1)
+        )
+        store.publishAll(tamperSnapshots, dayStartMillis = day1)
+
+        val retrieved = store.snapshots.first()
+        assertEquals("Clock tamper backwards must not reset usage", 4000L, retrieved["com.app.a"]?.usedMillis)
+    }
 }

@@ -1,6 +1,6 @@
 # Limiter State Tracker
 
-- **Current Phase:** H7-Final completed | **Commit:** Pending local commit
+- **Current Phase:** Final Locked Build & Anti-Reset Hardened | **Commit:** Pending local commit
 - **Decisions:**
   - D1: Baseline `compileSdk=targetSdk=minSdk=34`; test device runs Android 15 (API 35).
   - D2: `UsageMonitorService` invokes `LockCoordinator.reconcile()` when lock/retry is due.
@@ -9,16 +9,19 @@
   - D5: Max daily limit 720m, max raise +30m, self-lock allows viewing & adding targets.
   - D6: Horizon Clamp (36 hours) clamps multi-day stranded lock records in `LockCoordinator.reconcile()`.
   - D7: Ignore future-timestamped usage events in `UsageCalculator` and `UsageStatsReader`.
-- **Phases Completed:** P0–P7, H7-Final (OS Clock-Tamper Lock, Horizon Clamp, and One-Time ADB Recovery).
+  - D8: Anti-zombie session capping (`MAX_SESSION_DURATION_MILLIS=2h`, `MAX_UNCLOSED_SESSION_MILLIS=2h`) prevents clock jump inflation.
+  - D9: Monotonic daily usage anti-reset: within the same local calendar day (`dayStartMillis`), usage is non-decreasing and cannot be reset.
+  - D10: One-time compiled past cutoff constant `CLASH_ROYALE_TEST_CUTOFF_EPOCH_MILLIS` zeroed out morning clock-jump test usage for `com.supercell.clashroyale` for today only.
+- **Phases Completed:** P0–P7, H7-Final, Final Hardening & Clash Royale Refresh.
 - **Open Issues:** None.
-- **Test Status:** 291 unit tests, 0 failures, 100% passing (`./gradlew testDebugUnitTest --offline`).
-- **Build Status:** Debug APK compiled successfully (`./gradlew assembleDebug --offline`).
+- **Test Status:** 297 unit tests, 0 failures, 100% passing (`./gradlew testDebugUnitTest --offline`).
+- **Build Status:** Final Debug APK compiled successfully (`./gradlew assembleDebug --offline`).
 - **Phone Status (Xiaomi Redmi 12 - `4a952d897d79`):**
   - Device Owner: Active (`com.limiter.app/.admin.LimiterAdminReceiver`).
+  - Self-Protection: Active (`setUninstallBlocked=true`, `setUserControlDisabledPackages=[com.limiter.app]`).
   - User Restriction: `no_config_date_time` active (verified via `dumpsys user`).
   - FGS: Active (`UsageMonitorService`, `systemExempted`).
-  - Exact Alarm: Granted (`SCHEDULE_EXACT_ALARM: allow`).
-  - Active Targets: Legitimate locks clamped to today (e.g. `com.supercell.clashroyale`, `net.iGap`), other apps unlocked/restored.
+  - Target Status: `com.supercell.clashroyale` unlocked and starting at 0m (`hidden=false suspended=false`), scheduled targets (`com.instagram.android`, `net.iGap`) active.
 - **Invariants Reminder:**
   - R4: Never mutate persisted pipe/tilde codecs or DataStore keys.
   - R10: No INTERNET, no broad DPM restrictions (`DISALLOW_DEBUGGING_FEATURES`), retain testOnly.

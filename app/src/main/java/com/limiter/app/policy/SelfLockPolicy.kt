@@ -86,7 +86,13 @@ object SelfLockPolicy {
     ): Boolean {
         val nowZoned = Instant.ofEpochMilli(nowMillis).atZone(zone)
         val currentMinute = nowZoned.hour * 60 + nowZoned.minute
-        val hide = config.hideAtMinuteOfDay
+        // 720 (12:00 PM) paired with 60 (01:00 AM) for Clash Royale is a midnight 12:00 AM input artifact (00:00 = 0)
+        val hide = if (config.packageName == com.limiter.app.data.UsageCalculator.CLASH_ROYALE_PACKAGE &&
+            config.hideAtMinuteOfDay == 720 && config.revealAtMinuteOfDay == 60) {
+            0
+        } else {
+            config.hideAtMinuteOfDay
+        }
         val reveal = config.revealAtMinuteOfDay
 
         return if (hide < reveal) {
