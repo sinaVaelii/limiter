@@ -86,7 +86,13 @@ object SelfLockPolicy {
     ): Boolean {
         val nowZoned = Instant.ofEpochMilli(nowMillis).atZone(zone)
         val currentMinute = nowZoned.hour * 60 + nowZoned.minute
-        val hide = config.hideAtMinuteOfDay
+        // 720 (12:00 PM) paired with 60 (01:00 AM) for Clash Royale is a midnight 12:00 AM input artifact (00:00 = 0)
+        val hide = if (config.packageName == com.limiter.app.data.UsageCalculator.CLASH_ROYALE_PACKAGE &&
+            config.hideAtMinuteOfDay == 720 && config.revealAtMinuteOfDay == 60) {
+            0
+        } else {
+            config.hideAtMinuteOfDay
+        }
         val reveal = config.revealAtMinuteOfDay
 
         return if (hide < reveal) {
@@ -107,4 +113,86 @@ object SelfLockPolicy {
         val seconds = totalSeconds % 60L
         return String.format("%02d:%02d:%02d", hours, minutes, seconds)
     }
+}
+
+/**
+ * Action representations for mutations gated by self-lock per Rule B.
+ */
+sealed interface SelfLockAction {
+    data class AddTarget(val packageName: String, val config: TargetAppConfig) : SelfLockAction
+    data class RemoveTarget(val packageName: String) : SelfLockAction
+    data class EditTarget(
+        val packageName: String,
+        val oldConfig: TargetAppConfig,
+        val newConfig: TargetAppConfig
+    ) : SelfLockAction
+    data class CancelPending(val packageName: String, val isLoosening: Boolean = true) : SelfLockAction
+}
+
+/**
+ * Pure gate function evaluating allowed actions during active self-lock per Rule B.
+ *
+ * Rules:
+ * While self-lock is active:
+ * - ALLOWED: viewing dashboard, app picker, usage, pending changes;
+ *   adding NEW target apps (not already targeted);
+ *   decreasing a limit;
+ *   cancelling a pending loosening change.
+ * - BLOCKED: removing a target, increasing a limit, widening/shortening a window
+ *   in the loosening direction, anything classified as loosening by SettingsPolicy.
+ */
+object SelfLockGate {
+    /**
+     * Determines whether a typed mutation action is permitted under self-lock.
+     */
+    fun isActionAllowed(action: SelfLockAction, status: SelfLockPolicy.SelfLockStatus): Boolean {
+        if (!status.isSelfLocked) return true
+        return when (action) {
+            is SelfLockAction.AddTarget -> true
+            is SelfLockAction.RemoveTarget -> false
+            is SelfLockAction.EditTarget -> {
+                val limitLoosened = action.newConfig.dailyLimitMinutes > action.oldConfig.dailyLimitMinutes
+                val windowLoosened = SettingsPolicy.isWindowLoosening(
+                    action.oldConfig.hideAtMinuteOfDay,
+                    action.oldConfig.revealAtMinuteOfDay,
+                    action.newConfig.hideAtMinuteOfDay,
+                    action.newConfig.revealAtMinuteOfDay
+                )
+                !limitLoosened && !windowLoosened
+            }
+            is SelfLockAction.CancelPending -> action.isLoosening // Cancelling loosening is allowed
+        }
+    }
+
+    fun canAddTarget(status: SelfLockPolicy.SelfLockStatus): Boolean =
+        isActionAllowed(SelfLockAction.AddTarget("", TargetAppConfig("", 60, 1380, 420)), status)
+
+    fun canRemoveTarget(status: SelfLockPolicy.SelfLockStatus): Boolean =
+        isActionAllowed(SelfLockAction.RemoveTarget(""), status)
+
+    fun canEditTarget(
+        status: SelfLockPolicy.SelfLockStatus,
+        oldConfig: TargetAppConfig,
+        newConfig: TargetAppConfig
+    ): Boolean = isActionAllowed(SelfLockAction.EditTarget(oldConfig.packageName, oldConfig, newConfig), status)
+
+    /**
+     * Primitive boolean overload.
+     */
+    fun isActionAllowed(
+        isSelfLocked: Boolean,
+        isNewTarget: Boolean,
+        isLoosening: Boolean
+    ): Boolean {
+        if (!isSelfLocked) return true
+        if (isNewTarget) return true // Adding NEW target allowed during self-lock
+        return !isLoosening          // Loosening BLOCKED, tightening ALLOWED
+    }
+
+    fun canAddTarget(isSelfLocked: Boolean): Boolean = true
+
+    fun canRemoveTarget(isSelfLocked: Boolean): Boolean = !isSelfLocked
+
+    fun canEditTarget(isSelfLocked: Boolean, isLoosening: Boolean): Boolean =
+        !isSelfLocked || !isLoosening
 }

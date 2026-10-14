@@ -21,7 +21,27 @@ class DeviceCriticalPackageResolver(
     private val context: Context
 ) : CriticalPackageResolver {
 
+    @Volatile
+    private var cachedProtected: Set<String>? = null
+    private val cacheLock = Any()
+
     override fun resolveProtected(): Set<String> {
+        val cached = cachedProtected
+        if (cached != null) return cached
+        synchronized(cacheLock) {
+            val cachedInner = cachedProtected
+            if (cachedInner != null) return cachedInner
+            val resolved = doResolveProtected()
+            cachedProtected = resolved
+            return resolved
+        }
+    }
+
+    override fun invalidateCache() {
+        cachedProtected = null
+    }
+
+    private fun doResolveProtected(): Set<String> {
         val pm = context.packageManager
         val protected = mutableSetOf<String>()
 
@@ -115,28 +135,58 @@ class DeviceCriticalPackageResolver(
         protected.add("com.google.android.gsf")
 
         // Package verifier
-        val verifierIntent = Intent("android.intent.action.PACKAGE_NEEDS_VERIFICATION")
-        verifierIntent.type = "application/vnd.android.package-archive"
-        pm.queryBroadcastReceivers(verifierIntent, 0).forEach {
-            protected.add(it.activityInfo.packageName)
-        }
+        try {
+            val verifierIntent = Intent("android.intent.action.PACKAGE_NEEDS_VERIFICATION")
+            verifierIntent.type = "application/vnd.android.package-archive"
+            pm.queryBroadcastReceivers(verifierIntent, 0).forEach { resolveInfo ->
+                resolveInfo.activityInfo?.packageName?.let { protected.add(it) }
+            }
+        } catch (_: Exception) { /* package verifier query failure fallback */ }
 
         return protected
     }
 
-    override fun isEligibleTarget(packageName: String): Boolean {
+    override fun isEligibleTarget(packageName: String): Boolean =
+        isEligibleTarget(packageName, includeSystemApps = false)
+
+    override fun isEligibleTarget(packageName: String, includeSystemApps: Boolean): Boolean {
+        // Essential recovery and protected packages are strictly NEVER eligible targets
+        if (packageName in resolveProtected()) {
+            return false
+        }
+
         val pm = context.packageManager
         return try {
             val appInfo = pm.getApplicationInfo(packageName, 0)
-            // Only non-system user-installed apps are eligible
-            (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) == 0
+            if (!appInfo.enabled) {
+                return false
+            }
+
+            val isSystem = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0
+            if (isSystem && !includeSystemApps) {
+                return false
+            }
+
+            // Must expose a user-launchable activity
+            val launcherIntent = Intent(Intent.ACTION_MAIN)
+                .addCategory(Intent.CATEGORY_LAUNCHER)
+                .setPackage(packageName)
+            val activities = pm.queryIntentActivities(launcherIntent, 0)
+            activities.isNotEmpty()
         } catch (_: PackageManager.NameNotFoundException) {
+            false
+        } catch (_: Exception) {
+            // Unexpected PackageManager exceptions: safely return false
             false
         }
     }
 
     private fun resolveDefaultActivity(pm: PackageManager, intent: Intent): String? {
-        val resolveInfo = pm.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY)
+        val resolveInfo = try {
+            pm.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY)
+        } catch (_: Exception) {
+            null
+        }
         return resolveInfo?.activityInfo?.packageName
     }
 }

@@ -72,6 +72,17 @@ class SettingsRepository(
         }
     }
 
+    /** Replace both targets and pending changes atomically in a single DataStore transaction. */
+    suspend fun setTargetsAndPending(
+        targets: Map<String, TargetAppConfig>,
+        changes: List<PendingChange>
+    ) {
+        dataStore.edit { prefs ->
+            prefs[SettingsKeys.TARGETS] = Codec.encodeTargets(targets)
+            prefs[SettingsKeys.PENDING_CHANGES] = Codec.encodePending(changes)
+        }
+    }
+
     /** Add or replace a pending change for a specific package. */
     suspend fun putPending(change: PendingChange) {
         dataStore.edit { prefs ->

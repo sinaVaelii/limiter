@@ -1,7 +1,7 @@
 package com.limiter.app.dpm
 
 /**
- * App freezer API per AGENTS.md §22-23.
+ * App freezer API.
  *
  * A package is physically frozen ONLY if:
  *   hidden == true AND suspended == true
@@ -48,7 +48,7 @@ class AppFreezer(
 ) : AppFreezerApi {
 
     /**
-     * Freeze per §22:
+     * Freeze operation:
      * 1. suspend
      * 2. verify suspended
      * 3. hide

@@ -3,19 +3,36 @@ set -e
 
 echo "=== Environment Check ==="
 
-# 1. Java Version
-if ! command -v java >/dev/null 2>&1; then
-    echo "ERROR: java command not found in PATH."
+# 1. Java Version & JAVA_HOME
+JAVA_CMD="java"
+if [ -n "$JAVA_HOME" ] && [ -x "$JAVA_HOME/bin/java" ]; then
+    JAVA_CMD="$JAVA_HOME/bin/java"
+elif ! command -v java >/dev/null 2>&1 && [ -x "/usr/lib/jvm/java-17-openjdk-amd64/bin/java" ]; then
+    JAVA_CMD="/usr/lib/jvm/java-17-openjdk-amd64/bin/java"
+    export JAVA_HOME="/usr/lib/jvm/java-17-openjdk-amd64"
+fi
+
+if ! command -v "$JAVA_CMD" >/dev/null 2>&1 && [ ! -x "$JAVA_CMD" ]; then
+    echo "ERROR: java command not found."
     exit 1
 fi
 
-JAVA_VERSION_OUTPUT=$(java -version 2>&1)
-echo "Java Version output:"
+JAVA_VERSION_OUTPUT=$("$JAVA_CMD" -version 2>&1)
+echo "Java Version output (using $JAVA_CMD):"
 echo "$JAVA_VERSION_OUTPUT"
 
 if ! echo "$JAVA_VERSION_OUTPUT" | grep -q 'version "17\.' && ! echo "$JAVA_VERSION_OUTPUT" | grep -q 'version "17"'; then
-    echo "ERROR: Java major version is not 17."
-    exit 1
+    # If default java is not 17, check if JDK 17 is available on standard path
+    if [ -x "/usr/lib/jvm/java-17-openjdk-amd64/bin/java" ]; then
+        JAVA_CMD="/usr/lib/jvm/java-17-openjdk-amd64/bin/java"
+        export JAVA_HOME="/usr/lib/jvm/java-17-openjdk-amd64"
+        JAVA_VERSION_OUTPUT=$("$JAVA_CMD" -version 2>&1)
+        echo "Detected JDK 17 at $JAVA_CMD:"
+        echo "$JAVA_VERSION_OUTPUT"
+    else
+        echo "ERROR: Java major version is not 17."
+        exit 1
+    fi
 fi
 echo "OK: Java 17 detected."
 

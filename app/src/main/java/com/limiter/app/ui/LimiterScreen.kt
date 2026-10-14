@@ -1,7 +1,12 @@
 package com.limiter.app.ui
 
 import android.app.TimePickerDialog
+import android.content.Intent
 import android.graphics.drawable.Drawable
+import android.net.Uri
+import android.provider.Settings
+import android.util.LruCache
+import com.limiter.app.policy.SettingsPolicy
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -13,11 +18,15 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -29,20 +38,28 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -54,9 +71,11 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -78,24 +97,92 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
+private val iconBitmapCache = LruCache<String, ImageBitmap>(120)
+
+fun formatDuration(context: android.content.Context, minutes: Int): String {
+    val h = minutes / 60
+    val m = minutes % 60
+    return when {
+        h > 0 && m > 0 -> context.getString(R.string.duration_hours_minutes, h.toString(), m.toString())
+        h > 0 -> context.getString(R.string.duration_hours_only, h.toString())
+        else -> context.getString(R.string.duration_minutes_only, m.toString())
+    }
+}
+
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LimiterScreen(viewModel: MainViewModel) {
     val state by viewModel.uiState.collectAsState()
 
-    // 1. Self-Lock Mode Branching (User prompt & R4 requirement)
-    // While self-lock is active during a scheduled window, management controls are restricted
-    // and replaced by the full-screen live countdown screen.
-    if (state.selfLockStatus.isSelfLocked) {
-        SelfLockScreen(state = state, onTick = { viewModel.tickCurrentTime() })
-        return
+    // Refresh ticker driven by TimeSource for live countdown across all screens and exact-boundary updates
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(1000L)
+            viewModel.tickCurrentTime()
+        }
     }
 
-    // 2. Normal Management Dashboard
+    var showDashboardInSelfLock by remember { mutableStateOf(false) }
     var showAppPicker by remember { mutableStateOf(false) }
     var showBatchConfigDialog by remember { mutableStateOf(false) }
     var editingTarget by remember { mutableStateOf<TargetAppConfig?>(null) }
     var lockedReadOnlyTarget by remember { mutableStateOf<Pair<String, LockState.LockedUntil>?>(null) }
+
+    // 1. Self-Lock Mode Branching (Rule B)
+    // While self-lock is active during a scheduled window, management controls show
+    // the full-screen live countdown screen by default, while allowing adding new target apps
+    // and navigating to the dashboard to view limits/usage and perform tightening.
+    if (state.selfLockStatus.isSelfLocked && !showDashboardInSelfLock) {
+        SelfLockScreen(
+            state = state,
+            onAddApp = {
+                viewModel.loadAvailableApps()
+                showAppPicker = true
+            },
+            onViewDashboard = {
+                showDashboardInSelfLock = true
+            }
+        )
+
+        if (showAppPicker) {
+            AppPickerDialog(
+                state = state,
+                onSearchQueryChange = { viewModel.setSearchQuery(it) },
+                onTogglePackage = { viewModel.togglePackageSelection(it) },
+                onSelectAll = { viewModel.selectAllEligible(it) },
+                onClearSelections = { viewModel.clearSelections() },
+                onToggleShowSystemApps = { viewModel.setShowSystemApps(it) },
+                onDismiss = { showAppPicker = false },
+                onProceedToConfigure = {
+                    showAppPicker = false
+                    showBatchConfigDialog = true
+                }
+            )
+        }
+
+        if (showBatchConfigDialog) {
+            BatchConfigDialog(
+                selectedCount = state.selectedPackages.size,
+                isSelfLocked = true,
+                onDismiss = {
+                    showBatchConfigDialog = false
+                    viewModel.clearSelections()
+                },
+                onApply = { limit, hide, reveal ->
+                    viewModel.submitBatchConfig(
+                        packageNames = state.selectedPackages,
+                        dailyLimitMinutes = limit,
+                        hideAtMinuteOfDay = hide,
+                        revealAtMinuteOfDay = reveal
+                    )
+                    showBatchConfigDialog = false
+                }
+            )
+        }
+
+        return
+    }
 
     Scaffold(
         topBar = {
@@ -119,6 +206,45 @@ fun LimiterScreen(viewModel: MainViewModel) {
                 .padding(innerPadding)
                 .padding(16.dp)
         ) {
+            // Self-lock countdown banner when viewing dashboard during self-lock
+            if (state.selfLockStatus.isSelfLocked) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        val unlockMillis = state.selfLockStatus.unlockTimeMillis ?: 0L
+                        val remainingMillis = maxOf(0L, unlockMillis - state.currentMillis)
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = stringResource(R.string.self_lock_title),
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                            Text(
+                                text = "${stringResource(R.string.self_lock_countdown_label)} ${SelfLockPolicy.formatRemainingTime(remainingMillis)}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                        }
+                        TextButton(
+                            onClick = { showDashboardInSelfLock = false },
+                            modifier = Modifier.height(48.dp)
+                        ) {
+                            Text(stringResource(R.string.back), color = MaterialTheme.colorScheme.onErrorContainer)
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+
             // Feedback message banner
             if (state.feedbackMessage != null) {
                 Card(
@@ -148,7 +274,7 @@ fun LimiterScreen(viewModel: MainViewModel) {
                 Spacer(modifier = Modifier.height(8.dp))
             }
 
-            // System Status Card (§49 Onboarding/Status)
+            // System Status Card
             StatusCard(state = state)
             Spacer(modifier = Modifier.height(16.dp))
 
@@ -160,17 +286,56 @@ fun LimiterScreen(viewModel: MainViewModel) {
             Spacer(modifier = Modifier.height(8.dp))
 
             if (state.targets.isEmpty() && state.pendingChanges.isEmpty()) {
-                Box(
+                ElevatedCard(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(32.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = stringResource(R.string.no_apps_configured),
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        .padding(vertical = 16.dp),
+                    colors = CardDefaults.elevatedCardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
                     )
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Lock,
+                            contentDescription = stringResource(R.string.empty_targets_title),
+                            modifier = Modifier.size(48.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            text = stringResource(R.string.empty_targets_title),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = stringResource(R.string.empty_targets_msg),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Button(
+                            onClick = {
+                                viewModel.loadAvailableApps()
+                                showAppPicker = true
+                            },
+                            modifier = Modifier.heightIn(min = 48.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Add,
+                                contentDescription = stringResource(R.string.empty_targets_action),
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(stringResource(R.string.empty_targets_action))
+                        }
+                    }
                 }
             } else {
                 LazyColumn(
@@ -179,7 +344,7 @@ fun LimiterScreen(viewModel: MainViewModel) {
                 ) {
                     val allPackages = (state.targets.keys + state.pendingChanges.map { it.packageName }).distinct()
 
-                    items(allPackages) { pkg ->
+                    items(allPackages, key = { it }) { pkg ->
                         val config = state.targets[pkg]
                         val pending = state.pendingChanges.find { it.packageName == pkg }
                         val lockRecord = state.lockStates[pkg]
@@ -195,7 +360,7 @@ fun LimiterScreen(viewModel: MainViewModel) {
                             nowMillis = state.currentMillis,
                             onEdit = {
                                 if (lockState is LockState.LockedUntil && state.currentMillis < lockState.untilEpochMillis) {
-                                    // Branch to LockedReadOnly per §52
+                                    // Branch to LockedReadOnly
                                     lockedReadOnlyTarget = pkg to lockState
                                 } else {
                                     editingTarget = pending?.desired ?: config ?: TargetAppConfig(pkg, 60, 1380, 420)
@@ -221,6 +386,7 @@ fun LimiterScreen(viewModel: MainViewModel) {
             onTogglePackage = { viewModel.togglePackageSelection(it) },
             onSelectAll = { filtered -> viewModel.selectAllEligible(filtered) },
             onClearSelections = { viewModel.clearSelections() },
+            onToggleShowSystemApps = { viewModel.setShowSystemApps(it) },
             onDismiss = {
                 showAppPicker = false
                 viewModel.clearSelections()
@@ -236,6 +402,7 @@ fun LimiterScreen(viewModel: MainViewModel) {
     if (showBatchConfigDialog) {
         BatchConfigDialog(
             selectedCount = state.selectedPackages.size,
+            isSelfLocked = state.selfLockStatus.isSelfLocked,
             onDismiss = {
                 showBatchConfigDialog = false
                 viewModel.clearSelections()
@@ -262,6 +429,7 @@ fun LimiterScreen(viewModel: MainViewModel) {
             target = editingTarget!!,
             effectiveConfig = effectiveConfig,
             pendingChange = pendingChange,
+            isSelfLocked = state.selfLockStatus.isSelfLocked,
             onDismiss = { editingTarget = null },
             onSave = { updatedConfig ->
                 viewModel.submitConfig(updatedConfig)
@@ -274,7 +442,7 @@ fun LimiterScreen(viewModel: MainViewModel) {
         )
     }
 
-    // 4. Locked Read-Only Dialog per §52
+    // 4. Locked Read-Only Dialog
     if (lockedReadOnlyTarget != null) {
         val (pkg, lockState) = lockedReadOnlyTarget!!
         LockedReadOnlyDialog(
@@ -290,15 +458,14 @@ fun LimiterScreen(viewModel: MainViewModel) {
  * Dedicated, full-screen self-lock restricted mode screen.
  */
 @Composable
-fun SelfLockScreen(state: MainUiState, onTick: () -> Unit = {}) {
-    var nowMillis by remember { mutableLongStateOf(state.currentMillis) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            kotlinx.coroutines.delay(1000L)
-            nowMillis = System.currentTimeMillis()
-            onTick()
-        }
-    }
+fun SelfLockScreen(
+    state: MainUiState,
+    onTick: () -> Unit = {},
+    onAddApp: () -> Unit = {},
+    onViewDashboard: () -> Unit = {}
+) {
+    val context = LocalContext.current
+    val nowMillis = state.currentMillis
     val unlockMillis = state.selfLockStatus.unlockTimeMillis ?: 0L
     val remainingMillis = maxOf(0L, unlockMillis - nowMillis)
     val formattedUnlock = remember(unlockMillis) {
@@ -309,6 +476,7 @@ fun SelfLockScreen(state: MainUiState, onTick: () -> Unit = {}) {
             ""
         }
     }
+    val scrollState = rememberScrollState()
 
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -317,13 +485,16 @@ fun SelfLockScreen(state: MainUiState, onTick: () -> Unit = {}) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .verticalScroll(scrollState)
                 .padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+            verticalArrangement = Arrangement.Top
         ) {
+            Spacer(modifier = Modifier.height(16.dp))
+
             Icon(
                 imageVector = Icons.Default.Lock,
-                contentDescription = null,
+                contentDescription = stringResource(R.string.self_lock_title),
                 modifier = Modifier.size(64.dp),
                 tint = MaterialTheme.colorScheme.error
             )
@@ -342,12 +513,12 @@ fun SelfLockScreen(state: MainUiState, onTick: () -> Unit = {}) {
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Spacer(modifier = Modifier.height(32.dp))
+            Spacer(modifier = Modifier.height(24.dp))
 
             // Countdown Card
-            Card(
+            ElevatedCard(
                 modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
+                colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
             ) {
                 Column(
                     modifier = Modifier
@@ -379,7 +550,7 @@ fun SelfLockScreen(state: MainUiState, onTick: () -> Unit = {}) {
                 }
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
             // Explanation Card
             Card(
@@ -392,37 +563,334 @@ fun SelfLockScreen(state: MainUiState, onTick: () -> Unit = {}) {
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    if (state.selfLockStatus.activeLockedPackages.isNotEmpty()) {
-                        Spacer(modifier = Modifier.height(12.dp))
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Read-Only Managed App Limits Section
+            if (state.targets.isNotEmpty()) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
                         Text(
-                            text = stringResource(R.string.self_lock_active_apps_title),
-                            style = MaterialTheme.typography.labelLarge,
+                            text = stringResource(R.string.self_lock_configured_limits),
+                            style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = MaterialTheme.colorScheme.onSurface
                         )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        state.selfLockStatus.activeLockedPackages.forEach { pkg ->
-                            Text(
-                                text = "• $pkg",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        state.targets.values.forEach { target ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    AppIcon(packageName = target.packageName, modifier = Modifier.size(28.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = target.packageName,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                                Text(
+                                    text = "${formatDuration(context, target.dailyLimitMinutes)} (${formatTime(target.hideAtMinuteOfDay)}→${formatTime(target.revealAtMinuteOfDay)})",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                         }
                     }
                 }
+                Spacer(modifier = Modifier.height(24.dp))
+            } else {
+                Spacer(modifier = Modifier.height(8.dp))
             }
+
+            // Allowed actions during self-lock (Rule B): NO unlock/skip/snooze button
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                OutlinedButton(
+                    onClick = onAddApp,
+                    modifier = Modifier.weight(1f).height(48.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Add,
+                        contentDescription = stringResource(R.string.self_lock_add_app_secondary),
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(stringResource(R.string.self_lock_add_app_secondary))
+                }
+                Button(
+                    onClick = onViewDashboard,
+                    modifier = Modifier.weight(1f).height(48.dp)
+                ) {
+                    Text(stringResource(R.string.self_lock_view_dashboard))
+                }
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
         }
     }
 }
 
 /**
- * Onboarding and system status card per AGENTS.md §49.
+ * Onboarding and system status card health row.
  */
 @Composable
+fun HealthChipsRow(
+    state: MainUiState,
+    onShowDeviceOwnerDialog: () -> Unit,
+    onShowBatteryDialog: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+
+    LazyRow(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp)
+    ) {
+        // 1. Device Owner
+        item {
+            AssistChip(
+                onClick = {
+                    if (!state.isDeviceOwner) onShowDeviceOwnerDialog()
+                },
+                label = {
+                    Text(
+                        "${stringResource(R.string.chip_device_owner)}: ${
+                            if (state.isDeviceOwner) stringResource(R.string.chip_ok) else stringResource(R.string.chip_fix)
+                        }"
+                    )
+                },
+                leadingIcon = {
+                    Icon(
+                        imageVector = if (state.isDeviceOwner) Icons.Default.Check else Icons.Default.Warning,
+                        contentDescription = if (state.isDeviceOwner) stringResource(R.string.chip_ok) else stringResource(R.string.chip_fix),
+                        tint = if (state.isDeviceOwner) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(16.dp)
+                    )
+                },
+                colors = AssistChipDefaults.assistChipColors(
+                    containerColor = if (state.isDeviceOwner) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.errorContainer
+                )
+            )
+        }
+
+        // 2. Usage Access
+        item {
+            AssistChip(
+                onClick = {
+                    if (!state.hasUsageAccess) {
+                        try {
+                            context.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
+                        } catch (e: Exception) {
+                            android.util.Log.e("Limiter", "Failed to open usage access settings", e)
+                        }
+                    }
+                },
+                label = {
+                    Text(
+                        "${stringResource(R.string.chip_usage_access)}: ${
+                            if (state.hasUsageAccess) stringResource(R.string.chip_ok) else stringResource(R.string.chip_fix)
+                        }"
+                    )
+                },
+                leadingIcon = {
+                    Icon(
+                        imageVector = if (state.hasUsageAccess) Icons.Default.Check else Icons.Default.Warning,
+                        contentDescription = if (state.hasUsageAccess) stringResource(R.string.chip_ok) else stringResource(R.string.chip_fix),
+                        tint = if (state.hasUsageAccess) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(16.dp)
+                    )
+                },
+                colors = AssistChipDefaults.assistChipColors(
+                    containerColor = if (state.hasUsageAccess) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.errorContainer
+                )
+            )
+        }
+
+        // 3. Exact Alarm
+        item {
+            AssistChip(
+                onClick = {
+                    if (!state.hasExactAlarmPermission) {
+                        try {
+                            val intent = Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
+                                data = Uri.parse("package:${context.packageName}")
+                            }
+                            context.startActivity(intent)
+                        } catch (e: Exception) {
+                            android.util.Log.e("Limiter", "Failed to open exact alarm settings", e)
+                        }
+                    }
+                },
+                label = {
+                    Text(
+                        "${stringResource(R.string.chip_exact_alarm)}: ${
+                            if (state.hasExactAlarmPermission) stringResource(R.string.chip_ok) else stringResource(R.string.chip_fix)
+                        }"
+                    )
+                },
+                leadingIcon = {
+                    Icon(
+                        imageVector = if (state.hasExactAlarmPermission) Icons.Default.Check else Icons.Default.Warning,
+                        contentDescription = if (state.hasExactAlarmPermission) stringResource(R.string.chip_ok) else stringResource(R.string.chip_fix),
+                        tint = if (state.hasExactAlarmPermission) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(16.dp)
+                    )
+                },
+                colors = AssistChipDefaults.assistChipColors(
+                    containerColor = if (state.hasExactAlarmPermission) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.errorContainer
+                )
+            )
+        }
+
+        // 4. Notifications
+        item {
+            AssistChip(
+                onClick = {
+                    if (!state.hasNotificationPermission) {
+                        try {
+                            val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                                putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                            }
+                            context.startActivity(intent)
+                        } catch (e: Exception) {
+                            android.util.Log.e("Limiter", "Failed to open notification settings", e)
+                        }
+                    }
+                },
+                label = {
+                    Text(
+                        "${stringResource(R.string.chip_notifications)}: ${
+                            if (state.hasNotificationPermission) stringResource(R.string.chip_ok) else stringResource(R.string.chip_fix)
+                        }"
+                    )
+                },
+                leadingIcon = {
+                    Icon(
+                        imageVector = if (state.hasNotificationPermission) Icons.Default.Check else Icons.Default.Warning,
+                        contentDescription = if (state.hasNotificationPermission) stringResource(R.string.chip_ok) else stringResource(R.string.chip_fix),
+                        tint = if (state.hasNotificationPermission) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(16.dp)
+                    )
+                },
+                colors = AssistChipDefaults.assistChipColors(
+                    containerColor = if (state.hasNotificationPermission) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.errorContainer
+                )
+            )
+        }
+
+        // 5. Self-Protection
+        item {
+            val isProtected = state.isUninstallBlocked && state.isUserControlDisabled
+            AssistChip(
+                onClick = {},
+                label = {
+                    Text(
+                        "${stringResource(R.string.chip_self_protection)}: ${
+                            if (isProtected) stringResource(R.string.chip_ok) else stringResource(R.string.status_not_configured)
+                        }"
+                    )
+                },
+                leadingIcon = {
+                    Icon(
+                        imageVector = if (isProtected) Icons.Default.Check else Icons.Default.Warning,
+                        contentDescription = if (isProtected) stringResource(R.string.chip_ok) else stringResource(R.string.status_not_configured),
+                        tint = if (isProtected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(16.dp)
+                    )
+                },
+                colors = AssistChipDefaults.assistChipColors(
+                    containerColor = if (isProtected) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.errorContainer
+                )
+            )
+        }
+
+        // 6. Battery Guidance
+        item {
+            AssistChip(
+                onClick = onShowBatteryDialog,
+                label = { Text(stringResource(R.string.chip_battery_optimization)) },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Default.Check,
+                        contentDescription = stringResource(R.string.chip_battery_optimization),
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            )
+        }
+    }
+}
+
+@Composable
 fun StatusCard(state: MainUiState) {
-    Card(
+    val context = LocalContext.current
+    var showDeviceOwnerDialog by remember { mutableStateOf(false) }
+    var showBatteryDialog by remember { mutableStateOf(false) }
+
+    if (showDeviceOwnerDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeviceOwnerDialog = false },
+            title = { Text(stringResource(R.string.status_device_owner)) },
+            text = { Text(stringResource(R.string.device_owner_cmd_hint)) },
+            confirmButton = {
+                TextButton(onClick = { showDeviceOwnerDialog = false }) {
+                    Text(stringResource(R.string.confirm))
+                }
+            }
+        )
+    }
+
+    if (showBatteryDialog) {
+        AlertDialog(
+            onDismissRequest = { showBatteryDialog = false },
+            title = { Text(stringResource(R.string.battery_guidance_title)) },
+            text = { Text(stringResource(R.string.battery_guidance_msg)) },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showBatteryDialog = false
+                        try {
+                            val intent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                            context.startActivity(intent)
+                        } catch (_: Exception) {
+                            try {
+                                val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                    data = Uri.parse("package:${context.packageName}")
+                                }
+                                context.startActivity(intent)
+                            } catch (_: Exception) {}
+                        }
+                    }
+                ) {
+                    Text(stringResource(R.string.open_settings))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showBatteryDialog = false }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            }
+        )
+    }
+
+    ElevatedCard(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+        colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
@@ -432,48 +900,31 @@ fun StatusCard(state: MainUiState) {
             )
             Spacer(modifier = Modifier.height(8.dp))
 
-            StatusRow(
-                label = stringResource(R.string.status_device_owner),
-                isActive = state.isDeviceOwner,
-                activeText = stringResource(R.string.status_active),
-                inactiveText = stringResource(R.string.status_missing)
+            HealthChipsRow(
+                state = state,
+                onShowDeviceOwnerDialog = { showDeviceOwnerDialog = true },
+                onShowBatteryDialog = { showBatteryDialog = true }
             )
 
-            StatusRow(
-                label = stringResource(R.string.status_usage_access),
-                isActive = state.hasUsageAccess,
-                activeText = stringResource(R.string.status_granted),
-                inactiveText = stringResource(R.string.status_not_granted)
-            )
-
-            StatusRow(
-                label = stringResource(R.string.status_notifications),
-                isActive = state.hasNotificationPermission,
-                activeText = stringResource(R.string.status_granted),
-                inactiveText = stringResource(R.string.status_not_granted)
-            )
-
-            StatusRow(
-                label = stringResource(R.string.status_exact_alarm),
-                isActive = state.hasExactAlarmPermission,
-                activeText = stringResource(R.string.status_granted),
-                inactiveText = stringResource(R.string.status_not_granted)
-            )
-
-            StatusRow(
-                label = stringResource(R.string.status_device_policy),
-                isActive = state.isUninstallBlocked && state.isUserControlDisabled,
-                activeText = stringResource(R.string.status_blocked),
-                inactiveText = stringResource(R.string.status_not_configured)
-            )
-
-            if (!state.isDeviceOwner) {
+            if (!state.hasExactAlarmPermission) {
                 Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = stringResource(R.string.device_owner_cmd_hint),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error
-                )
+                OutlinedButton(
+                    onClick = {
+                        try {
+                            val intent = Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
+                                data = Uri.parse("package:${context.packageName}")
+                            }
+                            context.startActivity(intent)
+                        } catch (e: Exception) {
+                            android.util.Log.e("Limiter", "Failed to open exact alarm settings", e)
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                ) {
+                    Text(text = stringResource(R.string.btn_grant_exact_alarm))
+                }
             }
         }
     }
@@ -500,7 +951,7 @@ fun StatusRow(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(
                 imageVector = if (isActive) Icons.Default.Check else Icons.Default.Warning,
-                contentDescription = null,
+                contentDescription = if (isActive) activeText else inactiveText,
                 modifier = Modifier.size(16.dp),
                 tint = if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
             )
@@ -528,14 +979,19 @@ fun AppStatusCard(
 ) {
     val isLocked = lockState is LockState.LockedUntil && nowMillis < lockState.untilEpochMillis
 
-    Card(
+    ElevatedCard(
         modifier = Modifier
             .fillMaxWidth()
             .clickable {
                 if (isLocked) onLockedClick() else onEdit()
-            }
+            },
+        colors = CardDefaults.elevatedCardColors(
+            containerColor = if (isLocked) MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f)
+            else MaterialTheme.colorScheme.surface
+        )
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
+            // Header Row: App Icon + Name + Edit/Lock Button
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -544,7 +1000,22 @@ fun AppStatusCard(
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
                     AppIcon(packageName = packageName, modifier = Modifier.padding(end = 12.dp))
                     Column {
-                        Text(text = packageName, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            text = packageName,
+                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        if (config != null) {
+                            Text(
+                                text = stringResource(
+                                    R.string.target_schedule_window,
+                                    formatTime(config.hideAtMinuteOfDay),
+                                    formatTime(config.revealAtMinuteOfDay)
+                                ),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 }
                 IconButton(
@@ -554,97 +1025,153 @@ fun AppStatusCard(
                     Icon(
                         imageVector = if (isLocked) Icons.Default.Lock else Icons.Default.Edit,
                         contentDescription = if (isLocked) stringResource(R.string.locked_readonly_title) else stringResource(R.string.edit_target),
-                        tint = if (isLocked) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
+                        tint = if (isLocked) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
                     )
                 }
             }
-            Spacer(modifier = Modifier.height(4.dp))
 
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Usage & Progress Bar
             if (config != null) {
                 val usedMins = (usedMillis / 60_000).toInt()
-                val remainingMins = maxOf(0, config.dailyLimitMinutes - usedMins)
+                val limitMins = config.dailyLimitMinutes
+                val remainingMins = maxOf(0, limitMins - usedMins)
+                val progress = if (limitMins > 0) (usedMillis.toFloat() / (limitMins * 60_000f)).coerceIn(0f, 1f) else 0f
+
+                LinearProgressIndicator(
+                    progress = { progress },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(8.dp),
+                    color = when {
+                        progress >= 1f -> MaterialTheme.colorScheme.error
+                        progress >= 0.85f -> MaterialTheme.colorScheme.tertiary
+                        else -> MaterialTheme.colorScheme.primary
+                    },
+                    trackColor = MaterialTheme.colorScheme.surfaceVariant
+                )
+
+                Spacer(modifier = Modifier.height(6.dp))
 
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(text = stringResource(R.string.target_used_limit, usedMins, config.dailyLimitMinutes))
                     Text(
-                        text = if (remainingMins == 0) stringResource(R.string.target_limit_reached)
-                        else stringResource(R.string.target_remaining, remainingMins)
-                    )
-                }
-
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(
-                        text = stringResource(
-                            R.string.target_schedule_window,
-                            formatTime(config.hideAtMinuteOfDay),
-                            formatTime(config.revealAtMinuteOfDay)
-                        ),
+                        text = stringResource(R.string.target_used_limit, usedMins, limitMins),
                         style = MaterialTheme.typography.bodySmall
                     )
+                    Text(
+                        text = if (remainingMins == 0) stringResource(R.string.target_limit_reached)
+                        else stringResource(R.string.target_remaining, remainingMins),
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = if (remainingMins == 0) FontWeight.Bold else FontWeight.Normal,
+                        color = if (remainingMins == 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
+                    )
                 }
 
                 Spacer(modifier = Modifier.height(8.dp))
             }
 
-            when (lockState) {
-                is LockState.Unlocked -> {
-                    Text(
-                        text = stringResource(R.string.target_status_unlocked),
-                        color = MaterialTheme.colorScheme.primary,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-                is LockState.ReleasePending -> {
-                    Text(
-                        text = stringResource(R.string.target_status_restoring),
-                        color = MaterialTheme.colorScheme.tertiary,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-                is LockState.LockedUntil -> {
-                    val formattedTime = DateTimeFormatter.ofPattern("HH:mm")
-                        .withZone(ZoneId.systemDefault())
-                        .format(Instant.ofEpochMilli(lockState.untilEpochMillis))
-                    Text(
-                        text = stringResource(R.string.target_status_locked, formattedTime),
-                        color = MaterialTheme.colorScheme.error,
-                        fontWeight = FontWeight.Bold
-                    )
+            // State Badge Row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                when (lockState) {
+                    is LockState.Unlocked -> {
+                        AssistChip(
+                            onClick = onEdit,
+                            label = { Text(stringResource(R.string.target_state_active)) },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = stringResource(R.string.target_state_active),
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            },
+                            colors = AssistChipDefaults.assistChipColors(
+                                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                            )
+                        )
+                    }
+                    is LockState.ReleasePending -> {
+                        AssistChip(
+                            onClick = onLockedClick,
+                            label = { Text(stringResource(R.string.target_status_restoring)) },
+                            colors = AssistChipDefaults.assistChipColors(
+                                containerColor = MaterialTheme.colorScheme.tertiaryContainer
+                            )
+                        )
+                    }
+                    is LockState.LockedUntil -> {
+                        val formattedTime = DateTimeFormatter.ofPattern("HH:mm")
+                            .withZone(ZoneId.systemDefault())
+                            .format(Instant.ofEpochMilli(lockState.untilEpochMillis))
+                        AssistChip(
+                            onClick = onLockedClick,
+                            label = { Text(stringResource(R.string.target_state_locked, formattedTime)) },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Default.Lock,
+                                    contentDescription = stringResource(R.string.locked_readonly_title),
+                                    tint = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            },
+                            colors = AssistChipDefaults.assistChipColors(
+                                containerColor = MaterialTheme.colorScheme.errorContainer
+                            )
+                        )
+                    }
                 }
             }
 
+            // Pending Changes Card
             if (pendingChange != null) {
                 Spacer(modifier = Modifier.height(8.dp))
-                if (pendingChange.desired == null) {
-                    Text(
-                        text = stringResource(R.string.pending_removal),
-                        color = MaterialTheme.colorScheme.secondary,
-                        fontWeight = FontWeight.Medium
+                OutlinedCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.outlinedCardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
                     )
-                } else {
-                    Text(
-                        text = stringResource(
-                            R.string.pending_change_summary,
-                            pendingChange.desired.dailyLimitMinutes,
-                            formatTime(pendingChange.desired.hideAtMinuteOfDay),
-                            formatTime(pendingChange.desired.revealAtMinuteOfDay)
-                        ),
-                        color = MaterialTheme.colorScheme.secondary,
-                        fontWeight = FontWeight.Medium
-                    )
+                ) {
+                    Column(modifier = Modifier.padding(10.dp)) {
+                        if (pendingChange.desired == null) {
+                            Text(
+                                text = stringResource(R.string.pending_removal),
+                                color = MaterialTheme.colorScheme.secondary,
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Medium
+                            )
+                        } else {
+                            Text(
+                                text = stringResource(
+                                    R.string.pending_change_summary,
+                                    pendingChange.desired.dailyLimitMinutes,
+                                    formatTime(pendingChange.desired.hideAtMinuteOfDay),
+                                    formatTime(pendingChange.desired.revealAtMinuteOfDay)
+                                ),
+                                color = MaterialTheme.colorScheme.secondary,
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = stringResource(R.string.pending_applies_epoch_day, pendingChange.eligibleFromEpochDay),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
-                Text(
-                    text = stringResource(R.string.pending_applies_epoch_day, pendingChange.eligibleFromEpochDay),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
             }
         }
     }
 }
 
 /**
- * Read-only dialog shown when user inspects a locked application per AGENTS.md §52.
+ * Read-only dialog shown when user inspects a locked application.
  */
 @Composable
 fun LockedReadOnlyDialog(
@@ -664,12 +1191,16 @@ fun LockedReadOnlyDialog(
         title = { Text(stringResource(R.string.locked_readonly_title)) },
         text = {
             Column {
-                Text(
-                    text = packageName,
-                    fontWeight = FontWeight.Bold,
-                    style = MaterialTheme.typography.titleMedium
-                )
-                Spacer(modifier = Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    AppIcon(packageName = packageName, modifier = Modifier.size(36.dp))
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text(
+                        text = packageName,
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                }
+                Spacer(modifier = Modifier.height(12.dp))
                 Text(
                     text = stringResource(R.string.locked_readonly_msg),
                     style = MaterialTheme.typography.bodyMedium
@@ -718,8 +1249,36 @@ fun AppPickerDialog(
     onSelectAll: (List<DiscoveredApp>) -> Unit,
     onClearSelections: () -> Unit,
     onDismiss: () -> Unit,
-    onProceedToConfigure: () -> Unit
+    onProceedToConfigure: () -> Unit,
+    onToggleShowSystemApps: (Boolean) -> Unit = {}
 ) {
+    var hasConfirmedSystemAppsDialog by rememberSaveable { mutableStateOf(false) }
+    var showSystemConfirmDialog by remember { mutableStateOf(false) }
+
+    if (showSystemConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showSystemConfirmDialog = false },
+            title = { Text(stringResource(R.string.show_system_apps_confirm_title)) },
+            text = { Text(stringResource(R.string.show_system_apps_confirm_msg)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        hasConfirmedSystemAppsDialog = true
+                        showSystemConfirmDialog = false
+                        onToggleShowSystemApps(true)
+                    }
+                ) {
+                    Text(stringResource(R.string.confirm))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSystemConfirmDialog = false }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            }
+        )
+    }
+
     val filteredApps = remember(state.availableApps, state.searchQuery) {
         val q = state.searchQuery.trim().lowercase()
         if (q.isEmpty()) {
@@ -780,6 +1339,36 @@ fun AppPickerDialog(
 
                 Spacer(modifier = Modifier.height(8.dp))
 
+                // Show System Apps Toggle
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = stringResource(R.string.show_system_apps),
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Switch(
+                        checked = state.showSystemApps,
+                        onCheckedChange = { isChecked ->
+                            if (isChecked) {
+                                if (!hasConfirmedSystemAppsDialog) {
+                                    showSystemConfirmDialog = true
+                                } else {
+                                    onToggleShowSystemApps(true)
+                                }
+                            } else {
+                                onToggleShowSystemApps(false)
+                            }
+                        }
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
                 // Selection Controls
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -822,9 +1411,11 @@ fun AppPickerDialog(
                 } else {
                     LazyColumn(modifier = Modifier.weight(1f)) {
                         items(filteredApps, key = { it.packageName }) { app ->
+                            val isAlreadyLimited = state.selfLockStatus.isSelfLocked && app.packageName in state.targets
                             AppPickerRow(
                                 app = app,
                                 isSelected = state.selectedPackages.contains(app.packageName),
+                                isAlreadyLimited = isAlreadyLimited,
                                 onToggle = { onTogglePackage(app.packageName) }
                             )
                         }
@@ -850,18 +1441,23 @@ fun AppPickerDialog(
 fun AppPickerRow(
     app: DiscoveredApp,
     isSelected: Boolean,
+    isAlreadyLimited: Boolean = false,
     onToggle: () -> Unit
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onToggle)
+            .then(
+                if (isAlreadyLimited) Modifier
+                else Modifier.clickable(onClick = onToggle)
+            )
             .padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Checkbox(
             checked = isSelected,
-            onCheckedChange = { onToggle() },
+            onCheckedChange = if (isAlreadyLimited) null else { { onToggle() } },
+            enabled = !isAlreadyLimited,
             modifier = Modifier.size(48.dp)
         )
         Spacer(modifier = Modifier.width(8.dp))
@@ -870,6 +1466,175 @@ fun AppPickerRow(
         Column(modifier = Modifier.weight(1f)) {
             Text(text = app.label, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
             Text(text = app.packageName, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (isAlreadyLimited) {
+                Text(
+                    text = stringResource(R.string.picker_already_limited),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.secondary,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun DurationSelector(
+    dailyLimitMinutes: Int,
+    onDurationChanged: (Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    var hours by remember(dailyLimitMinutes) { mutableIntStateOf(dailyLimitMinutes / 60) }
+    var minutes by remember(dailyLimitMinutes) { mutableIntStateOf(dailyLimitMinutes % 60) }
+
+    val quickOptions = listOf(
+        15 to R.string.duration_chip_15m,
+        30 to R.string.duration_chip_30m,
+        60 to R.string.duration_chip_1h,
+        120 to R.string.duration_chip_2h,
+        240 to R.string.duration_chip_4h,
+        480 to R.string.duration_chip_8h,
+        720 to R.string.duration_chip_12h
+    )
+
+    Column(modifier = modifier.fillMaxWidth()) {
+        // Current Duration Display
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = stringResource(R.string.custom_duration_title),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = formatDuration(context, dailyLimitMinutes),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
+            )
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Quick Duration Chips
+        LazyRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            contentPadding = PaddingValues(horizontal = 2.dp, vertical = 2.dp)
+        ) {
+            items(quickOptions) { (mins, labelRes) ->
+                val isSelected = dailyLimitMinutes == mins
+                FilterChip(
+                    selected = isSelected,
+                    onClick = {
+                        hours = mins / 60
+                        minutes = mins % 60
+                        onDurationChanged(mins)
+                    },
+                    label = { Text(stringResource(labelRes)) },
+                    modifier = Modifier.heightIn(min = 48.dp)
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // Hours Stepper
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = stringResource(R.string.hours_stepper_label, hours.toString()),
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedButton(
+                    onClick = {
+                        val newH = maxOf(0, hours - 1)
+                        hours = newH
+                        val newTotal = (newH * 60 + minutes).coerceIn(
+                            SettingsPolicy.MIN_DAILY_LIMIT_MINUTES,
+                            SettingsPolicy.MAX_DAILY_LIMIT_MINUTES
+                        )
+                        onDurationChanged(newTotal)
+                    },
+                    modifier = Modifier.size(48.dp),
+                    contentPadding = PaddingValues(0.dp)
+                ) {
+                    Text("-", style = MaterialTheme.typography.titleMedium)
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                OutlinedButton(
+                    onClick = {
+                        val newH = minOf(12, hours + 1)
+                        hours = newH
+                        val newTotal = (newH * 60 + minutes).coerceIn(
+                            SettingsPolicy.MIN_DAILY_LIMIT_MINUTES,
+                            SettingsPolicy.MAX_DAILY_LIMIT_MINUTES
+                        )
+                        onDurationChanged(newTotal)
+                    },
+                    modifier = Modifier.size(48.dp),
+                    contentPadding = PaddingValues(0.dp)
+                ) {
+                    Text("+", style = MaterialTheme.typography.titleMedium)
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Minutes Stepper (step = 5)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = stringResource(R.string.minutes_stepper_label, minutes.toString()),
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedButton(
+                    onClick = {
+                        val newM = if (minutes <= 0) 55 else minutes - 5
+                        minutes = newM
+                        val newTotal = (hours * 60 + newM).coerceIn(
+                            SettingsPolicy.MIN_DAILY_LIMIT_MINUTES,
+                            SettingsPolicy.MAX_DAILY_LIMIT_MINUTES
+                        )
+                        onDurationChanged(newTotal)
+                    },
+                    modifier = Modifier.size(48.dp),
+                    contentPadding = PaddingValues(0.dp)
+                ) {
+                    Text("-", style = MaterialTheme.typography.titleMedium)
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                OutlinedButton(
+                    onClick = {
+                        val newM = if (minutes >= 55) 0 else minutes + 5
+                        minutes = newM
+                        val newTotal = (hours * 60 + newM).coerceIn(
+                            SettingsPolicy.MIN_DAILY_LIMIT_MINUTES,
+                            SettingsPolicy.MAX_DAILY_LIMIT_MINUTES
+                        )
+                        onDurationChanged(newTotal)
+                    },
+                    modifier = Modifier.size(48.dp),
+                    contentPadding = PaddingValues(0.dp)
+                ) {
+                    Text("+", style = MaterialTheme.typography.titleMedium)
+                }
+            }
         }
     }
 }
@@ -877,6 +1642,7 @@ fun AppPickerRow(
 @Composable
 fun BatchConfigDialog(
     selectedCount: Int,
+    isSelfLocked: Boolean = false,
     onDismiss: () -> Unit,
     onApply: (limit: Int, hide: Int, reveal: Int) -> Unit
 ) {
@@ -886,6 +1652,31 @@ fun BatchConfigDialog(
     var hideMinute by remember { mutableIntStateOf(23 * 60) }
     var revealMinute by remember { mutableIntStateOf(7 * 60) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    var showConfirmSelfLockAdd by remember { mutableStateOf(false) }
+
+    if (showConfirmSelfLockAdd) {
+        AlertDialog(
+            onDismissRequest = { showConfirmSelfLockAdd = false },
+            title = { Text(stringResource(R.string.self_lock_add_confirmation_title)) },
+            text = { Text(stringResource(R.string.self_lock_add_confirmation)) },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showConfirmSelfLockAdd = false
+                        onApply(dailyLimit, hideMinute, revealMinute)
+                    },
+                    modifier = Modifier.height(48.dp)
+                ) {
+                    Text(stringResource(R.string.confirm))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showConfirmSelfLockAdd = false }, modifier = Modifier.height(48.dp)) {
+                    Text(stringResource(R.string.cancel))
+                }
+            }
+        )
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -899,15 +1690,23 @@ fun BatchConfigDialog(
                 )
                 Spacer(modifier = Modifier.height(16.dp))
 
-                OutlinedTextField(
-                    value = dailyLimit.toString(),
-                    onValueChange = { dailyLimit = it.toIntOrNull() ?: 0 },
-                    label = { Text(stringResource(R.string.daily_limit_label)) },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    modifier = Modifier.fillMaxWidth()
+                DurationSelector(
+                    dailyLimitMinutes = dailyLimit,
+                    onDurationChanged = {
+                        dailyLimit = it
+                        errorMessage = null
+                    }
                 )
 
                 Spacer(modifier = Modifier.height(16.dp))
+
+                // Window summary
+                Text(
+                    text = stringResource(R.string.window_summary, formatTime(hideMinute), formatTime(revealMinute)),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(8.dp))
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -960,15 +1759,19 @@ fun BatchConfigDialog(
         confirmButton = {
             Button(
                 onClick = {
-                    if (dailyLimit !in 1..1440) {
-                        errorMessage = "Daily limit must be between 1 and 1440 minutes"
+                    if (dailyLimit !in SettingsPolicy.MIN_DAILY_LIMIT_MINUTES..SettingsPolicy.MAX_DAILY_LIMIT_MINUTES) {
+                        errorMessage = context.getString(R.string.error_daily_limit_range)
                         return@Button
                     }
                     if (hideMinute == revealMinute) {
-                        errorMessage = "Hide time and reveal time cannot be identical"
+                        errorMessage = context.getString(R.string.error_identical_times)
                         return@Button
                     }
-                    onApply(dailyLimit, hideMinute, revealMinute)
+                    if (isSelfLocked) {
+                        showConfirmSelfLockAdd = true
+                    } else {
+                        onApply(dailyLimit, hideMinute, revealMinute)
+                    }
                 },
                 modifier = Modifier.height(48.dp)
             ) {
@@ -988,6 +1791,7 @@ fun EditTargetDialog(
     target: TargetAppConfig,
     effectiveConfig: TargetAppConfig? = null,
     pendingChange: PendingChange? = null,
+    isSelfLocked: Boolean = false,
     onDismiss: () -> Unit,
     onSave: (TargetAppConfig) -> Unit,
     onRemove: (String) -> Unit
@@ -999,6 +1803,10 @@ fun EditTargetDialog(
     var revealMinute by remember(target.packageName) { mutableIntStateOf(target.revealAtMinuteOfDay) }
     var errorMessage by remember(target.packageName) { mutableStateOf<String?>(null) }
     var showConfirmRemove by remember(target.packageName) { mutableStateOf(false) }
+
+    val currentActiveLimit = effectiveConfig?.dailyLimitMinutes ?: target.dailyLimitMinutes
+    val currentActiveHide = effectiveConfig?.hideAtMinuteOfDay ?: target.hideAtMinuteOfDay
+    val currentActiveReveal = effectiveConfig?.revealAtMinuteOfDay ?: target.revealAtMinuteOfDay
 
     if (showConfirmRemove) {
         AlertDialog(
@@ -1067,15 +1875,36 @@ fun EditTargetDialog(
                     Spacer(modifier = Modifier.height(8.dp))
                 }
 
-                OutlinedTextField(
-                    value = dailyLimit.toString(),
-                    onValueChange = { dailyLimit = it.toIntOrNull() ?: 0 },
-                    label = { Text(stringResource(R.string.daily_limit_label)) },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    modifier = Modifier.fillMaxWidth()
+                // Localized Helper Text for Limits and Increases
+                Text(
+                    text = stringResource(
+                        R.string.edit_limit_helper,
+                        formatDuration(context, currentActiveLimit),
+                        formatDuration(context, SettingsPolicy.MAX_LIMIT_INCREASE_MINUTES)
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Custom stepped duration selector (no raw minute text input)
+                DurationSelector(
+                    dailyLimitMinutes = dailyLimit,
+                    onDurationChanged = {
+                        dailyLimit = it
+                        errorMessage = null
+                    }
                 )
 
                 Spacer(modifier = Modifier.height(16.dp))
+
+                // Window summary
+                Text(
+                    text = stringResource(R.string.window_summary, formatTime(hideMinute), formatTime(revealMinute)),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(8.dp))
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -1125,24 +1954,48 @@ fun EditTargetDialog(
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
-                OutlinedButton(
-                    onClick = { showConfirmRemove = true },
-                    modifier = Modifier.fillMaxWidth().height(48.dp)
-                ) {
-                    Text(stringResource(R.string.remove_target), color = MaterialTheme.colorScheme.error)
+                if (isSelfLocked) {
+                    Text(
+                        text = stringResource(R.string.self_lock_controls_locked),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                } else {
+                    OutlinedButton(
+                        onClick = { showConfirmRemove = true },
+                        modifier = Modifier.fillMaxWidth().height(48.dp)
+                    ) {
+                        Text(stringResource(R.string.remove_target), color = MaterialTheme.colorScheme.error)
+                    }
                 }
             }
         },
         confirmButton = {
             Button(
                 onClick = {
-                    if (dailyLimit !in 1..1440) {
+                    if (dailyLimit !in SettingsPolicy.MIN_DAILY_LIMIT_MINUTES..SettingsPolicy.MAX_DAILY_LIMIT_MINUTES) {
                         errorMessage = context.getString(R.string.error_daily_limit_range)
                         return@Button
                     }
                     if (hideMinute == revealMinute) {
                         errorMessage = context.getString(R.string.error_identical_times)
                         return@Button
+                    }
+                    if (isSelfLocked) {
+                        if (dailyLimit > currentActiveLimit) {
+                            errorMessage = context.getString(R.string.self_lock_controls_locked)
+                            return@Button
+                        }
+                        if (SettingsPolicy.isWindowLoosening(currentActiveHide, currentActiveReveal, hideMinute, revealMinute)) {
+                            errorMessage = context.getString(R.string.self_lock_controls_locked)
+                            return@Button
+                        }
+                    } else {
+                        val increase = dailyLimit - currentActiveLimit
+                        if (increase > SettingsPolicy.MAX_LIMIT_INCREASE_MINUTES) {
+                            errorMessage = context.getString(R.string.error_limit_increase_max)
+                            return@Button
+                        }
                     }
                     onSave(
                         target.copy(
@@ -1168,21 +2021,31 @@ fun EditTargetDialog(
 @Composable
 fun AppIcon(packageName: String, modifier: Modifier = Modifier) {
     val context = LocalContext.current
-    var drawable by remember(packageName) { mutableStateOf<Drawable?>(null) }
+    var bitmap by remember(packageName) {
+        mutableStateOf(iconBitmapCache.get(packageName))
+    }
 
     LaunchedEffect(packageName) {
-        withContext(Dispatchers.IO) {
-            try {
-                drawable = context.packageManager.getApplicationIcon(packageName)
-            } catch (_: Exception) {}
+        if (bitmap == null) {
+            val loaded = withContext(Dispatchers.IO) {
+                try {
+                    val drawable = context.packageManager.getApplicationIcon(packageName)
+                    drawable.toBitmap().asImageBitmap()
+                } catch (_: Exception) {
+                    null
+                }
+            }
+            if (loaded != null) {
+                iconBitmapCache.put(packageName, loaded)
+                bitmap = loaded
+            }
         }
     }
 
-    if (drawable != null) {
-        val bitmap = remember(drawable) { drawable!!.toBitmap().asImageBitmap() }
+    if (bitmap != null) {
         Image(
-            bitmap = bitmap,
-            contentDescription = null,
+            bitmap = bitmap!!,
+            contentDescription = stringResource(R.string.cd_app_icon),
             modifier = modifier.size(40.dp)
         )
     } else {
@@ -1192,7 +2055,11 @@ fun AppIcon(packageName: String, modifier: Modifier = Modifier) {
                 .padding(4.dp),
             contentAlignment = Alignment.Center
         ) {
-            Icon(Icons.Default.Lock, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            Icon(
+                Icons.Default.Lock,
+                contentDescription = stringResource(R.string.cd_app_icon),
+                tint = MaterialTheme.colorScheme.primary
+            )
         }
     }
 }

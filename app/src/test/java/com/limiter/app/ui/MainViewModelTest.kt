@@ -36,7 +36,7 @@ import java.time.ZoneId
 import java.time.ZonedDateTime
 
 @OptIn(ExperimentalCoroutinesApi::class)
-class MainViewModelR4Test {
+class MainViewModelTest {
 
     @get:Rule
     val tempFolder = TemporaryFolder()
@@ -158,7 +158,9 @@ class MainViewModelR4Test {
             lockCoordinator = coordinator,
             appDiscoveryRepository = discoveryRepo,
             criticalPackageResolver = resolver,
-            systemStatusChecker = statusChecker
+            systemStatusChecker = statusChecker,
+            ioDispatcher = testDispatcher,
+            defaultDispatcher = testDispatcher
         )
     }
 
@@ -251,6 +253,7 @@ class MainViewModelR4Test {
             isUserControlDisabled = true
         )
         viewModel.refreshSystemStatus()
+        testScheduler.advanceUntilIdle()
 
         val state = viewModel.uiState.first()
         assertTrue(state.isDeviceOwner)

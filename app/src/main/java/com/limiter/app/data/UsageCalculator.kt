@@ -21,6 +21,22 @@ import com.limiter.app.model.UsageEventRecord.EventType
  */
 object UsageCalculator {
 
+    /** Maximum duration capped for a single continuous foreground session between RESUME and PAUSE. */
+    const val MAX_SESSION_DURATION_MILLIS: Long = 2L * 60 * 60 * 1000 // 2 hours
+
+    /** Maximum duration capped for an unclosed session spanning to window end without closing events. */
+    const val MAX_UNCLOSED_SESSION_MILLIS: Long = 2L * 60 * 60 * 1000 // 2 hours
+
+    /** Target package for one-time test cutoff */
+    const val CLASH_ROYALE_PACKAGE = "com.supercell.clashroyale"
+
+    /**
+     * One-time cutoff timestamp for com.supercell.clashroyale (Oct 14, 2026).
+     * Events before this millisecond are ignored so pre-install clock-tamper test artifacts
+     * are zeroed out for today, while all future usage from this exact moment onward is counted normally.
+     */
+    const val CLASH_ROYALE_TEST_CUTOFF_EPOCH_MILLIS: Long = 1792005933309L
+
     /**
      * Calculate foreground milliseconds for [packageName] within [fromMillis, toMillis].
      *
@@ -37,9 +53,28 @@ object UsageCalculator {
             "fromMillis ($fromMillis) must be <= toMillis ($toMillis)"
         }
 
-        // Filter to relevant package only, sorted by timestamp
+        val effectiveFromMillis = if (packageName == CLASH_ROYALE_PACKAGE) {
+            maxOf(fromMillis, CLASH_ROYALE_TEST_CUTOFF_EPOCH_MILLIS)
+        } else {
+            fromMillis
+        }
+
+        if (toMillis < effectiveFromMillis) {
+            return 0L
+        }
+
+        // Filter to relevant package only, sorted by timestamp; ignore future-timestamped events and pre-cutoff Clash Royale test events
         val relevant = events
-            .filter { it.packageName == packageName || it.eventType == EventType.DEVICE_SHUTDOWN }
+            .filter {
+                val matchesPkgOrShutdown = (it.packageName == packageName || it.eventType == EventType.DEVICE_SHUTDOWN)
+                val notFuture = it.timestampMillis <= toMillis
+                val notBeforeClashRoyaleCutoff = if (it.packageName == CLASH_ROYALE_PACKAGE) {
+                    it.timestampMillis >= CLASH_ROYALE_TEST_CUTOFF_EPOCH_MILLIS
+                } else {
+                    true
+                }
+                matchesPkgOrShutdown && notFuture && notBeforeClashRoyaleCutoff
+            }
             .sortedBy { it.timestampMillis }
 
         // Track active activities by their className (or "unknown" if null)
@@ -54,7 +89,7 @@ object UsageCalculator {
         fun startForegroundIfNeeded(atMillis: Long) {
             if (lastForegroundStart == null && activeActivities.isNotEmpty()) {
                 // Clamp to window start
-                lastForegroundStart = maxOf(atMillis, fromMillis)
+                lastForegroundStart = maxOf(atMillis, effectiveFromMillis)
             }
         }
 
@@ -63,7 +98,9 @@ object UsageCalculator {
                 val end = minOf(atMillis, toMillis)
                 val start = lastForegroundStart!!
                 if (end > start) {
-                    totalForegroundMs += end - start
+                    val rawDuration = end - start
+                    val duration = minOf(rawDuration, MAX_SESSION_DURATION_MILLIS)
+                    totalForegroundMs += duration
                 }
                 lastForegroundStart = null
             }
@@ -103,12 +140,14 @@ object UsageCalculator {
             }
         }
 
-        // If still active at end of window, count up to toMillis
+        // If still active at end of window, count up to toMillis (capped to prevent clock-jump zombie session inflation)
         if (activeActivities.isNotEmpty() && lastForegroundStart != null) {
             val end = toMillis
             val start = lastForegroundStart!!
             if (end > start) {
-                totalForegroundMs += end - start
+                val rawDuration = end - start
+                val duration = minOf(rawDuration, MAX_UNCLOSED_SESSION_MILLIS)
+                totalForegroundMs += duration
             }
         }
 

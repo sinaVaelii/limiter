@@ -8,33 +8,36 @@ import com.limiter.app.model.UsageEventRecord.EventType
 import com.limiter.app.time.TimeMath
 import com.limiter.app.time.TimeSource
 
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+
 /**
  * Reads usage events from the Android UsageStatsManager and maps
  * them to the internal [UsageEventRecord] model.
  *
- * Lookback: Queries from the previous local day's beginning (48 hours
- * before local midnight) to catch activities resumed before midnight
- * that remained active across the boundary.
+ * Lookback: Queries from 3 hours before local midnight to catch activities
+ * resumed late in the evening that remained active across the midnight boundary.
  *
- * Documented lookback: 48 hours before the accounting window start.
- * This covers the previous day entirely plus a safety margin for
- * activities that might span across day boundaries.
+ * M4 Optimization: Narrowed from 48h to 3h because activities spanning midnight
+ * begin in the late evening; querying 48h every poll tick created severe overhead.
+ * All queries execute off the Main thread using ioDispatcher (defaults to Dispatchers.IO).
  */
 class UsageStatsReader(
     private val context: Context,
-    private val timeSource: TimeSource
+    private val timeSource: TimeSource,
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO
 ) {
 
     companion object {
         /**
-         * Lookback duration: 48 hours in millis.
+         * Lookback duration: 3 hours in millis.
          *
-         * This ensures we capture ACTIVITY_RESUMED events from the previous
-         * day that may still be active across midnight. The previous day's
-         * beginning plus a full day of buffer accounts for edge cases in
-         * timezone transitions and DST changes.
+         * Sufficient to capture any ACTIVITY_RESUMED events from the late evening
+         * before midnight that are still active across the midnight boundary,
+         * without repeatedly loading multi-day historical event logs.
          */
-        const val LOOKBACK_MILLIS: Long = 48L * 60 * 60 * 1000
+        const val LOOKBACK_MILLIS: Long = 3L * 60 * 60 * 1000
     }
 
     /**
@@ -45,15 +48,34 @@ class UsageStatsReader(
      * Query window: local midnight - LOOKBACK -> now.
      *
      * Returns foreground milliseconds for the package today.
+     * Runs off the Main thread on Dispatchers.IO.
      */
-    fun readTodayUsageMillis(packageName: String): Long {
+    suspend fun readTodayUsageMillis(packageName: String): Long = withContext(ioDispatcher) {
         val nowMillis = timeSource.nowMillis()
         val zone = timeSource.zone()
         val midnightMillis = TimeMath.localMidnightMillis(nowMillis, zone)
         val queryStart = midnightMillis - LOOKBACK_MILLIS
 
         val events = queryEvents(queryStart, nowMillis)
-        return UsageCalculator.foregroundMillis(events, packageName, midnightMillis, nowMillis)
+        UsageCalculator.foregroundMillis(events, packageName, midnightMillis, nowMillis)
+    }
+
+    /**
+     * Read usage events once for all specified packages and calculate foreground millis.
+     * Avoids querying the event window multiple times on each monitor tick.
+     * Runs off the Main thread on ioDispatcher.
+     */
+    suspend fun readTodayUsageMillisBatch(packageNames: Set<String>): Map<String, Long> = withContext(ioDispatcher) {
+        if (packageNames.isEmpty()) return@withContext emptyMap()
+        val nowMillis = timeSource.nowMillis()
+        val zone = timeSource.zone()
+        val midnightMillis = TimeMath.localMidnightMillis(nowMillis, zone)
+        val queryStart = midnightMillis - LOOKBACK_MILLIS
+
+        val events = queryEvents(queryStart, nowMillis)
+        packageNames.associateWith { pkg ->
+            UsageCalculator.foregroundMillis(events, pkg, midnightMillis, nowMillis)
+        }
     }
 
     /**
@@ -75,6 +97,7 @@ class UsageStatsReader(
 
         while (usageEvents.hasNextEvent()) {
             usageEvents.getNextEvent(event)
+            if (event.timeStamp > endMillis) continue
             val eventType = mapEventType(event.eventType) ?: continue
             records.add(
                 UsageEventRecord(
@@ -95,20 +118,11 @@ class UsageStatsReader(
     fun hasUsageAccess(): Boolean {
         val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as? android.app.AppOpsManager
             ?: return false
-        val mode = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-            appOps.unsafeCheckOpNoThrow(
-                android.app.AppOpsManager.OPSTR_GET_USAGE_STATS,
-                android.os.Process.myUid(),
-                context.packageName
-            )
-        } else {
-            @Suppress("DEPRECATION")
-            appOps.checkOpNoThrow(
-                android.app.AppOpsManager.OPSTR_GET_USAGE_STATS,
-                android.os.Process.myUid(),
-                context.packageName
-            )
-        }
+        val mode = appOps.unsafeCheckOpNoThrow(
+            android.app.AppOpsManager.OPSTR_GET_USAGE_STATS,
+            android.os.Process.myUid(),
+            context.packageName
+        )
         return mode == android.app.AppOpsManager.MODE_ALLOWED
     }
 

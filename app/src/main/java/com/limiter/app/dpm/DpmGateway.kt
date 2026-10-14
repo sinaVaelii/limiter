@@ -1,7 +1,7 @@
 package com.limiter.app.dpm
 
 /**
- * Thin abstraction over DevicePolicyManager per AGENTS.md §21.
+ * Thin abstraction over DevicePolicyManager.
  *
  * The real implementation owns all direct DPM interaction.
  * Unit tests fake this interface.
@@ -37,13 +37,18 @@ interface DpmGateway {
     fun getUserControlDisabledPackages(): List<String>
 
     /**
-     * Check if a package is installed on the device.
+     * Get package installation status with reliable distinction between
+     * confirmed installed, confirmed not installed, and unknown (transient/error).
+     */
+    fun getPackageInstallStatus(pkg: String): PackageInstallStatus
+
+    /**
+     * Check if a package is confirmed installed on the device.
      */
     fun isPackageInstalled(pkg: String): Boolean
 
     /**
-     * Returns a list of all packages on the device that are physically frozen
-     * (hidden == true && suspended == true).
+     * Enforce OS date, time, and timezone tamper protection via Device Owner.
      */
-    fun getAllFrozenPackages(): List<String>
+    fun enforceTimeTamperProtection(): Boolean = true
 }

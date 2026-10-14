@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
-import com.limiter.app.model.TargetAppConfig
 import com.limiter.app.ui.LimiterScreen
 import com.limiter.app.ui.MainViewModel
 import com.limiter.app.ui.theme.LimiterTheme
@@ -39,24 +38,93 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    companion object {
+        const val ACTION_INTERNAL_NAVIGATE = "com.limiter.app.action.INTERNAL_NAVIGATE"
+
+        val FORBIDDEN_MUTATION_KEYS = setOf("add_target", "limit", "hide", "reveal")
+
+        fun isUntrustedMutation(extraKeys: Set<String>?): Boolean {
+            if (extraKeys == null) return false
+            return extraKeys.any { it in FORBIDDEN_MUTATION_KEYS }
+        }
+
+        data class ParsedIntent(
+            val action: String?,
+            val extraKeys: Set<String> = emptySet(),
+            val hasMalformedExtras: Boolean = false
+        ) {
+            companion object {
+                fun fromIntent(intent: Intent?): ParsedIntent? {
+                    if (intent == null) return null
+                    return try {
+                        val keys = intent.extras?.keySet() ?: emptySet()
+                        ParsedIntent(action = intent.action, extraKeys = keys)
+                    } catch (e: Exception) {
+                        android.util.Log.w("Limiter", "Failed to inspect intent extras: action=${intent.action}", e)
+                        ParsedIntent(action = intent.action, hasMalformedExtras = true)
+                    }
+                }
+            }
+        }
+
+        enum class IntentGateDecision {
+            REJECT_MUTATION,
+            REJECT_MALFORMED,
+            ALLOW_MAIN,
+            ALLOW_NAVIGATE,
+            IGNORE_EXTERNAL
+        }
+
+        fun evaluateIntent(parsed: ParsedIntent?): IntentGateDecision {
+            if (parsed == null) return IntentGateDecision.IGNORE_EXTERNAL
+            if (parsed.hasMalformedExtras) return IntentGateDecision.REJECT_MALFORMED
+            if (isUntrustedMutation(parsed.extraKeys)) return IntentGateDecision.REJECT_MUTATION
+
+            return when (parsed.action) {
+                Intent.ACTION_MAIN -> IntentGateDecision.ALLOW_MAIN
+                ACTION_INTERNAL_NAVIGATE -> IntentGateDecision.ALLOW_NAVIGATE
+                else -> IntentGateDecision.IGNORE_EXTERNAL
+            }
+        }
+
+        fun isUntrustedMutationIntent(intent: Intent?): Boolean {
+            val parsed = ParsedIntent.fromIntent(intent) ?: return false
+            val decision = evaluateIntent(parsed)
+            return decision == IntentGateDecision.REJECT_MUTATION || decision == IntentGateDecision.REJECT_MALFORMED
+        }
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         handleIntent(intent)
     }
 
-    private fun handleIntent(intent: Intent?) {
-        val targetPkg = intent?.getStringExtra("add_target") ?: return
-        val limit = intent.getIntExtra("limit", 60)
-        val hide = intent.getIntExtra("hide", 0)
-        val reveal = intent.getIntExtra("reveal", 1)
-        val app = application as LimiterApp
-        app.applicationScope.launch {
-            try {
-                val config = TargetAppConfig(targetPkg, limit, hide, reveal)
-                app.lockCoordinator?.tryEditConfig(config)
-                app.lockCoordinator?.reconcile()
-                app.timeWindowScheduler?.reschedule()
-            } catch (_: Exception) {}
+    internal fun handleIntent(intent: Intent?) {
+        val parsed = ParsedIntent.fromIntent(intent) ?: return
+        val decision = evaluateIntent(parsed)
+
+        when (decision) {
+            IntentGateDecision.REJECT_MUTATION -> {
+                android.util.Log.w(
+                    "Limiter",
+                    "Rejected untrusted intent attempting mutation: action=${parsed.action}, keys=${parsed.extraKeys}"
+                )
+            }
+            IntentGateDecision.REJECT_MALFORMED -> {
+                android.util.Log.w(
+                    "Limiter",
+                    "Rejected malformed intent with unreadable extras: action=${parsed.action}"
+                )
+            }
+            IntentGateDecision.ALLOW_MAIN -> {
+                // Legitimate launcher launch; display UI normally
+            }
+            IntentGateDecision.ALLOW_NAVIGATE -> {
+                // Legitimate internal navigation (view transition only, no mutations)
+            }
+            IntentGateDecision.IGNORE_EXTERNAL -> {
+                // Safely ignore unknown external actions
+            }
         }
     }
 
@@ -65,7 +133,7 @@ class MainActivity : ComponentActivity() {
         viewModel.refreshSystemStatus()
         val app = application as LimiterApp
         app.applicationScope.launch {
-            app.lockCoordinator?.reconcile()
+            app.lockCoordinator.reconcile()
         }
     }
 
@@ -73,7 +141,13 @@ class MainActivity : ComponentActivity() {
         super.onStart()
         val app = application as LimiterApp
         if (app.isDeviceOwner()) {
-            com.limiter.app.service.UsageMonitorService.start(this)
+            try {
+                com.limiter.app.service.UsageMonitorService.start(this)
+            } catch (e: android.app.ForegroundServiceStartNotAllowedException) {
+                android.util.Log.e("Limiter", "Foreground service start not allowed in MainActivity.onStart", e)
+            } catch (e: Exception) {
+                android.util.Log.e("Limiter", "Failed to start UsageMonitorService in MainActivity.onStart", e)
+            }
         }
     }
 }

@@ -723,5 +723,54 @@ class LockCoordinatorTest {
         assertFalse("ir.divar must be unhidden", gateway.hiddenPackages.contains(pkg))
         assertFalse("ir.divar must be unsuspended", gateway.suspendedPackages.contains(pkg))
     }
+
+    @Test
+    fun `enforceSelfProtection invokes dpmGateway enforceTimeTamperProtection`() {
+        assertFalse(gateway.timeTamperProtectionEnforced)
+        val result = coordinator.enforceSelfProtection()
+        assertEquals(LockCoordinator.SelfProtectionResult.Applied, result)
+        assertTrue(gateway.timeTamperProtectionEnforced)
+    }
+
+    @Test
+    fun `stranded lock with untilEpochMillis 5 days in future is clamped and unlocked immediately when reconcile runs at now`() = runTest {
+        val pkg = "com.example.stranded"
+        gateway.installedPackages.add(pkg)
+        gateway.hiddenPackages.add(pkg)
+        gateway.suspendedPackages.add(pkg)
+
+        val now = zdtToMillis(12, 0)
+        timeSource.setNowMillis(now)
+
+        // Set lock deadline 5 days into future (clock tamper simulation)
+        val fiveDaysFuture = now + 5L * 24 * 60 * 60 * 1000
+        lockStateStore.ensureRecord(pkg)
+        lockStateStore.lockUntilAtLeast(pkg, fiveDaysFuture)
+
+        // Target config with no active window right now (hide at 23:00, reveal at 07:00, now is 12:00)
+        settingsRepository.putTarget(
+            TargetAppConfig(
+                packageName = pkg,
+                dailyLimitMinutes = 60,
+                hideAtMinuteOfDay = 23 * 60,
+                revealAtMinuteOfDay = 7 * 60
+            )
+        )
+
+        val result = coordinator.reconcile()
+        assertTrue(result is LockCoordinator.ReconcileResult.Ok)
+
+        // Record must be transitioned to Unlocked
+        val recordAfter = lockStateStore.snapshot()[pkg]!!
+        assertEquals(LockState.Unlocked, recordAfter.state)
+
+        // Package must be physically unhidden and unsuspended
+        assertFalse(gateway.hiddenPackages.contains(pkg))
+        assertFalse(gateway.suspendedPackages.contains(pkg))
+
+        // LockEvent.Unlocked must be emitted
+        val okResult = result as LockCoordinator.ReconcileResult.Ok
+        assertTrue(okResult.events.any { it is LockCoordinator.LockEvent.Unlocked && it.pkg == pkg })
+    }
 }
 

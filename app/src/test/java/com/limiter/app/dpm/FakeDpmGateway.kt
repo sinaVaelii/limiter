@@ -1,7 +1,7 @@
 package com.limiter.app.dpm
 
 /**
- * Fake [DpmGateway] for unit testing per AGENTS.md §46.
+ * Fake [DpmGateway] for unit testing.
  *
  * Simulates DPM state without Android framework dependencies.
  */
@@ -102,13 +102,26 @@ class FakeDpmGateway : DpmGateway {
         return if (deviceOwner) disabledUserControlPackages else emptyList()
     }
 
-    override fun isPackageInstalled(pkg: String): Boolean {
-        return pkg in installedPackages
+    val packageInstallStatusMap: MutableMap<String, PackageInstallStatus> = mutableMapOf()
+
+    override fun getPackageInstallStatus(pkg: String): PackageInstallStatus {
+        packageInstallStatusMap[pkg]?.let { return it }
+        return if (pkg in installedPackages) {
+            PackageInstallStatus.Installed
+        } else {
+            PackageInstallStatus.NotInstalled
+        }
     }
 
-    override fun getAllFrozenPackages(): List<String> {
-        return installedPackages.filter { pkg ->
-            hiddenPackages.contains(pkg) || suspendedPackages.contains(pkg)
-        }
+    override fun isPackageInstalled(pkg: String): Boolean {
+        return getPackageInstallStatus(pkg) is PackageInstallStatus.Installed
+    }
+
+    var timeTamperProtectionEnforced: Boolean = false
+
+    override fun enforceTimeTamperProtection(): Boolean {
+        if (!deviceOwner) return false
+        timeTamperProtectionEnforced = true
+        return true
     }
 }

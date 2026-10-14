@@ -6,6 +6,7 @@ import com.limiter.app.data.SettingsRepository
 import com.limiter.app.dpm.AppFreezerApi
 import com.limiter.app.dpm.DpmGateway
 import com.limiter.app.dpm.DpmOperationResult
+import com.limiter.app.dpm.PackageInstallStatus
 import com.limiter.app.model.LockRecord
 import com.limiter.app.model.LockState
 import com.limiter.app.model.PendingChange
@@ -17,7 +18,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 /**
- * LockCoordinator per AGENTS.md §28-37.
+ * LockCoordinator.
  *
  * This is the authoritative lock transition boundary.
  * Only LockCoordinator owns AppFreezerApi.
@@ -72,7 +73,7 @@ class LockCoordinator(
     }
 
     /**
-     * Full reconciliation per AGENTS.md §30-36.
+     * Full reconciliation.
      *
      * Idempotent. Reconciles desired state + persisted state + actual DPM state.
      */
@@ -82,20 +83,11 @@ class LockCoordinator(
 
     /**
      * Called by the monitor service when a package's daily limit is reached.
-     * Per AGENTS.md §37.
      */
     override suspend fun onLimitReached(packageName: String, usedMillis: Long) {
         mutex.withLock {
             onLimitReachedInternal(packageName, usedMillis)
         }
-    }
-
-    /**
-     * Called on each monitor tick to trigger reconciliation of expired locks
-     * and scheduled windows.
-     */
-    suspend fun onTick() {
-        reconcile()
     }
 
     // -----------------------------------------------------------------------
@@ -112,10 +104,38 @@ class LockCoordinator(
             return ReconcileResult.NotDeviceOwner
         }
 
-        val targets = settingsRepository.snapshotTargets()
+        val rawTargets = settingsRepository.snapshotTargets()
+        val targets = rawTargets.toMutableMap()
+        for ((pkg, config) in rawTargets) {
+            if (config.dailyLimitMinutes > SettingsPolicy.MAX_DAILY_LIMIT_MINUTES) {
+                val clamped = config.copy(dailyLimitMinutes = SettingsPolicy.MAX_DAILY_LIMIT_MINUTES)
+                safeLogE("Clamping target $pkg daily limit from ${config.dailyLimitMinutes} to ${SettingsPolicy.MAX_DAILY_LIMIT_MINUTES} minutes")
+                settingsRepository.putTarget(clamped)
+                targets[pkg] = clamped
+            }
+        }
         val pendingChanges = settingsRepository.snapshotPending()
         val lockRecords = lockStateStore.snapshot().toMutableMap()
         val protectedPkgs = criticalPackageResolver.resolveProtected()
+
+        // Horizon Clamp: inspect each stored lock record to prevent multi-day lock deadlines
+        for ((pkg, record) in lockRecords.toMap()) {
+            val lockedUntil = record.state as? LockState.LockedUntil ?: continue
+            if (lockedUntil.untilEpochMillis > now + MAX_LOCK_HORIZON_MILLIS) {
+                val config = targets[pkg]
+                val clampedUntil = if (config != null && isInsideWindow(config, now, zone)) {
+                    TimeMath.nextOccurrence(now, zone, config.revealAtMinuteOfDay)
+                } else {
+                    now
+                }
+                val clampedRecord = record.copy(state = LockState.LockedUntil(clampedUntil))
+                lockRecords[pkg] = clampedRecord
+                if (clampedUntil > now) {
+                    lockStateStore.recordUnlock(pkg)
+                    lockStateStore.lockUntilAtLeast(pkg, clampedUntil)
+                }
+            }
+        }
 
         // Phase B — Build Recovery Set (Requirement 1)
         // Only recover packages using reliable Limiter-managed history:
@@ -128,8 +148,12 @@ class LockCoordinator(
         // Never forget or remove a package's persistent record until its required physical restoration
         // has succeeded (hidden == false && suspended == false).
         for (pkg in recoverySet.toSet()) {
-            if (!gateway.isPackageInstalled(pkg)) {
-                val record = lockRecords[pkg]
+            val installStatus = gateway.getPackageInstallStatus(pkg)
+            if (installStatus !is PackageInstallStatus.NotInstalled) {
+                // If package is Installed OR Unknown (transient error), do NOT treat as missing!
+                continue
+            }
+            val record = lockRecords[pkg]
                 if (record != null) {
                     val lockedUntil = record.state as? LockState.LockedUntil
                     // Preserve active restrictions on configured targets (Requirement 5):
@@ -145,24 +169,20 @@ class LockCoordinator(
                     val isSuspended = freezer.isSuspended(pkg) == true
 
                     if (isHidden || isSuspended) {
-                        // Package is still physically restricted; attempt independent unfreeze
-                        var visRestored = !isHidden
-                        var unsuspRestored = !isSuspended
+                        val restoration = attemptIndependentUnfreeze(
+                            pkg = pkg,
+                            initialVisibilityRestored = !isHidden,
+                            initialUnsuspensionRestored = !isSuspended
+                        )
 
-                        if (!unsuspRestored) {
-                            if (freezer.restoreSuspension(pkg) is DpmOperationResult.Ok) {
-                                unsuspRestored = true
-                            }
-                        }
-                        if (!visRestored) {
-                            if (freezer.restoreVisibility(pkg) is DpmOperationResult.Ok) {
-                                visRestored = true
-                            }
-                        }
-
-                        if (!visRestored || !unsuspRestored) {
+                        if (!restoration.isFullyRestored) {
                             // Unfreeze failed; retain recovery record with backoff
-                            lockStateStore.recordUnlockFailure(pkg, now, visRestored, unsuspRestored)
+                            lockStateStore.recordUnlockFailure(
+                                pkg = pkg,
+                                now = now,
+                                visibilityRestored = restoration.visibilityRestored,
+                                unsuspensionRestored = restoration.unsuspensionRestored
+                            )
                             val updated = lockStateStore.snapshot()[pkg]
                             if (updated != null) {
                                 lockRecords[pkg] = updated
@@ -185,7 +205,6 @@ class LockCoordinator(
                         lockRecords[pkg] = LockRecord(LockState.Unlocked)
                     }
                 }
-            }
         }
 
         // Phase D — Resolve Expired Locks and ReleasePending FIRST (Requirement 3)
@@ -201,35 +220,67 @@ class LockCoordinator(
 
             if (!needsRelease) continue
 
-            // If package is missing, Phase C handles physical verification
-            if (!gateway.isPackageInstalled(pkg)) continue
-
             // Check exponential backoff retry window
             val retryAt = record.nextUnlockRetryAtMillis
             if (retryAt != null && now < retryAt) {
                 continue // Backoff has not elapsed yet
             }
 
+            // Query package installation status
+            val installStatus = gateway.getPackageInstallStatus(pkg)
+
+            // If package is confirmed missing, Phase C handles physical verification
+            if (installStatus is PackageInstallStatus.NotInstalled) continue
+
+            // If status is Unknown:
+            // An inconclusive package query does not normally authorize unhide, unsuspend, or release operations.
+            // However, after 3 consecutive Unknown failures, attempt unfreeze fallback per release safety gate.
+            // If both restoreVisibility and restoreSuspension succeed, transition to Unlocked and commit.
+            if (installStatus is PackageInstallStatus.Unknown) {
+                var visRestored = record.visibilityRestored || ((state as? LockState.ReleasePending)?.visibilityRestored ?: false)
+                var unsusRestored = record.unsuspensionRestored || ((state as? LockState.ReleasePending)?.unsuspensionRestored ?: false)
+                if (record.unlockFailureCount >= 3) {
+                    val restoration = attemptIndependentUnfreeze(
+                        pkg = pkg,
+                        initialVisibilityRestored = visRestored,
+                        initialUnsuspensionRestored = unsusRestored
+                    )
+                    visRestored = restoration.visibilityRestored
+                    unsusRestored = restoration.unsuspensionRestored
+                    if (restoration.isFullyRestored) {
+                        lockStateStore.recordUnlock(pkg)
+                        lockStateStore.clearUnlockRetry(pkg)
+                        lockRecords[pkg] = LockRecord(LockState.Unlocked)
+                        events.add(LockEvent.Unlocked(pkg))
+                        continue
+                    }
+                }
+                lockStateStore.recordUnlockFailure(
+                    pkg = pkg,
+                    now = now,
+                    visibilityRestored = visRestored,
+                    unsuspensionRestored = unsusRestored
+                )
+                val updated = lockStateStore.snapshot()[pkg]
+                if (updated != null) {
+                    lockRecords[pkg] = updated
+                }
+                continue
+            }
+
             // Determine current restoration status
             var visibilityRestored = record.visibilityRestored || ((state as? LockState.ReleasePending)?.visibilityRestored ?: false)
             var unsuspensionRestored = record.unsuspensionRestored || ((state as? LockState.ReleasePending)?.unsuspensionRestored ?: false)
 
-            // Requirement 3: Attempt unsuspend and unhide independently, retry ONLY incomplete operations
-            if (!unsuspensionRestored) {
-                val unsuspendResult = freezer.restoreSuspension(pkg)
-                if (unsuspendResult is DpmOperationResult.Ok) {
-                    unsuspensionRestored = true
-                }
-            }
+            val restoration = attemptIndependentUnfreeze(
+                pkg = pkg,
+                initialVisibilityRestored = visibilityRestored,
+                initialUnsuspensionRestored = unsuspensionRestored
+            )
+            visibilityRestored = restoration.visibilityRestored
+            unsuspensionRestored = restoration.unsuspensionRestored
 
-            if (!visibilityRestored) {
-                val unhideResult = freezer.restoreVisibility(pkg)
-                if (unhideResult is DpmOperationResult.Ok) {
-                    visibilityRestored = true
-                }
-            }
-
-            if (visibilityRestored && unsuspensionRestored) {
+            if (restoration.isFullyRestored) {
                 // Both restored successfully!
                 lockStateStore.recordUnlock(pkg)
                 lockStateStore.clearUnlockRetry(pkg)
@@ -250,7 +301,7 @@ class LockCoordinator(
             }
         }
 
-        // Phase D.5 — Repair Active Locks (§31)
+        // Phase D.5 — Repair Active Locks
         for (pkg in recoverySet.toSet()) {
             if (!gateway.isPackageInstalled(pkg)) continue
             val record = lockRecords[pkg] ?: continue
@@ -259,15 +310,35 @@ class LockCoordinator(
             // Requirement 3: Ensure reconciliation cannot re-freeze a package while it is
             // undergoing release (state is not ReleasePending) or protected.
             if (now < lockedUntil.untilEpochMillis && pkg !in protectedPkgs) {
+                val retryAt = record.nextUnlockRetryAtMillis
+                if (retryAt != null && now < retryAt) {
+                    continue
+                }
                 val frozen = freezer.isFrozen(pkg)
                 if (frozen != true) {
                     // Repair physical state — do not change logical until
-                    freezer.freeze(pkg)
+                    val freezeResult = freezer.freeze(pkg)
+                    if (freezeResult !is DpmOperationResult.Ok) {
+                        safeLogE("Failed to repair freeze for $pkg: $freezeResult")
+                        lockStateStore.recordUnlockFailure(pkg, now)
+                        val updated = lockStateStore.snapshot()[pkg]
+                        if (updated != null) {
+                            lockRecords[pkg] = updated
+                        }
+                    } else {
+                        if (record.unlockFailureCount > 0 || record.nextUnlockRetryAtMillis != null) {
+                            lockStateStore.clearUnlockRetry(pkg)
+                            val updated = lockStateStore.snapshot()[pkg]
+                            if (updated != null) {
+                                lockRecords[pkg] = updated
+                            }
+                        }
+                    }
                 }
             }
         }
 
-        // Phase E — Apply Pending Changes AFTER Unlock (§32)
+        // Phase E — Apply Pending Changes AFTER Unlock
         val todayEpochDay = TimeMath.localEpochDay(now, zone)
         // Re-read lock records since some may have been unlocked
         val currentLockStates = lockRecords.mapValues { (_, record) -> record.state }
@@ -283,23 +354,37 @@ class LockCoordinator(
             val remainingPending = pendingChanges.toMutableList()
 
             for (change in eligiblePending) {
-                if (!gateway.isPackageInstalled(change.packageName)) continue
-                if (change.desired != null) {
-                    updatedTargets[change.packageName] = change.desired
-                } else {
-                    updatedTargets.remove(change.packageName)
+                when (gateway.getPackageInstallStatus(change.packageName)) {
+                    is PackageInstallStatus.Unknown -> {
+                        // Transient error: do NOT discard pending change, do NOT modify targets.
+                        // Leave change in remainingPending so it retries on next reconciliation.
+                        continue
+                    }
+                    is PackageInstallStatus.NotInstalled -> {
+                        // Package is confirmed not installed on the device.
+                        // Ensure removed from targets and clear pending change so it doesn't re-trigger indefinitely.
+                        updatedTargets.remove(change.packageName)
+                        remainingPending.removeAll { it.packageName == change.packageName }
+                        continue
+                    }
+                    is PackageInstallStatus.Installed -> {
+                        if (change.desired != null) {
+                            updatedTargets[change.packageName] = change.desired
+                        } else {
+                            updatedTargets.remove(change.packageName)
+                        }
+                        remainingPending.removeAll { it.packageName == change.packageName }
+                    }
                 }
-                remainingPending.removeAll { it.packageName == change.packageName }
             }
 
-            settingsRepository.setTargets(updatedTargets)
-            settingsRepository.setPending(remainingPending)
+            settingsRepository.setTargetsAndPending(updatedTargets, remainingPending)
         }
 
         // Recalculate effective targets after pending changes
         val effectiveTargets = settingsRepository.snapshotTargets()
 
-        // Phase F — New Scheduled Window Locks (§33)
+        // Phase F — New Scheduled Window Locks
         for ((pkg, config) in effectiveTargets) {
             if (!gateway.isPackageInstalled(pkg)) continue
             val record = lockRecords[pkg]
@@ -318,13 +403,22 @@ class LockCoordinator(
             if (isInsideWindow(config, now, zone)) {
                 val revealUntil = TimeMath.nextOccurrence(now, zone, config.revealAtMinuteOfDay)
                 lockStateStore.lockUntilAtLeast(pkg, revealUntil)
-                freezer.freeze(pkg)
-                lockRecords[pkg] = LockRecord(LockState.LockedUntil(revealUntil))
-                events.add(LockEvent.WindowLocked(pkg, revealUntil))
+                val freezeResult = freezer.freeze(pkg)
+                if (freezeResult is DpmOperationResult.Ok) {
+                    lockRecords[pkg] = LockRecord(LockState.LockedUntil(revealUntil))
+                    events.add(LockEvent.WindowLocked(pkg, revealUntil))
+                } else {
+                    safeLogE("Failed to freeze $pkg during scheduled window: $freezeResult")
+                    lockStateStore.recordUnlockFailure(pkg, now)
+                    val updated = lockStateStore.snapshot()[pkg]
+                    if (updated != null) {
+                        lockRecords[pkg] = updated
+                    }
+                }
             }
         }
 
-        // Phase G — Orphan physical freeze recovery (§35)
+        // Phase G — Orphan physical freeze recovery
         for (pkg in recoverySet.toSet()) {
             if (!gateway.isPackageInstalled(pkg)) continue
             val record = lockRecords[pkg]
@@ -342,22 +436,13 @@ class LockCoordinator(
                             isInsideWindow(config, now, zone)
 
                     if (!shouldBeLocked) {
-                        // Attempt independent unfreeze
-                        var visRestored = !hidden
-                        var unsuspRestored = !suspended
+                        val restoration = attemptIndependentUnfreeze(
+                            pkg = pkg,
+                            initialVisibilityRestored = !hidden,
+                            initialUnsuspensionRestored = !suspended
+                        )
 
-                        if (!unsuspRestored) {
-                            if (freezer.restoreSuspension(pkg) is DpmOperationResult.Ok) {
-                                unsuspRestored = true
-                            }
-                        }
-                        if (!visRestored) {
-                            if (freezer.restoreVisibility(pkg) is DpmOperationResult.Ok) {
-                                visRestored = true
-                            }
-                        }
-
-                        if (visRestored && unsuspRestored) {
+                        if (restoration.isFullyRestored) {
                             lockStateStore.recordUnlock(pkg)
                             lockStateStore.clearUnlockRetry(pkg)
                             lockRecords[pkg] = LockRecord(LockState.Unlocked)
@@ -367,8 +452,8 @@ class LockCoordinator(
                             lockStateStore.recordUnlockFailure(
                                 pkg = pkg,
                                 now = now,
-                                visibilityRestored = visRestored,
-                                unsuspensionRestored = unsuspRestored
+                                visibilityRestored = restoration.visibilityRestored,
+                                unsuspensionRestored = restoration.unsuspensionRestored
                             )
                             val updated = lockStateStore.snapshot()[pkg]
                             if (updated != null) {
@@ -380,7 +465,7 @@ class LockCoordinator(
             }
         }
 
-        // Phase H — Protected transition (§36)
+        // Phase H — Protected transition
         for (pkg in recoverySet.toSet()) {
             if (!gateway.isPackageInstalled(pkg)) continue
             if (pkg !in protectedPkgs) continue
@@ -395,15 +480,16 @@ class LockCoordinator(
             }
         }
 
-        // Enforce self-protection policies (§24, §45)
+        // Enforce self-protection policies
         val selfProtection = enforceSelfProtection()
 
         return ReconcileResult.Ok(events, selfProtection)
     }
 
     /**
-     * onLimitReached per AGENTS.md §37.
+     * onLimitReached implementation.
      */
+    @Suppress("UNUSED_PARAMETER")
     private suspend fun onLimitReachedInternal(packageName: String, usedMillis: Long) {
         val now = timeSource.nowMillis()
         val zone = timeSource.zone()
@@ -427,8 +513,15 @@ class LockCoordinator(
         val existing = lockRecords[packageName]
         if (existing != null) {
             val lockedUntil = existing.state as? LockState.LockedUntil
-            if (lockedUntil != null && now < lockedUntil.untilEpochMillis) {
-                return // Already locked
+            if (lockedUntil != null && lockedUntil.untilEpochMillis > now) {
+                val windowUntil = if (isInsideWindow(config, now, zone)) {
+                    TimeMath.nextOccurrence(now, zone, config.revealAtMinuteOfDay)
+                } else {
+                    0L
+                }
+                if (lockedUntil.untilEpochMillis >= windowUntil) {
+                    return // Already locked with valid future deadline and meets window requirement
+                }
             }
             val isUndergoingRelease = existing.state is LockState.ReleasePending ||
                     existing.nextUnlockRetryAtMillis != null ||
@@ -440,7 +533,7 @@ class LockCoordinator(
             }
         }
 
-        // Calculate lock-until per §34
+        // Calculate lock-until (at least until next reveal or midnight)
         val nextReveal = TimeMath.nextOccurrence(now, zone, config.revealAtMinuteOfDay)
         val nextMidnight = TimeMath.nextLocalMidnightMillis(now, zone)
         val until = maxOf(nextReveal, nextMidnight)
@@ -449,11 +542,15 @@ class LockCoordinator(
         lockStateStore.lockUntilAtLeast(packageName, until)
 
         // 2. Freeze
-        freezer.freeze(packageName)
+        val freezeResult = freezer.freeze(packageName)
+        if (freezeResult !is DpmOperationResult.Ok) {
+            safeLogE("Failed to freeze $packageName on limit reached: $freezeResult")
+            lockStateStore.recordUnlockFailure(packageName, now)
+        }
     }
 
     /**
-     * Enforce Device Owner policies on Limiter itself per §24 and §45.
+     * Enforce Device Owner policies on Limiter itself.
      */
     fun enforceSelfProtection(): SelfProtectionResult {
         if (!gateway.isDeviceOwner()) return SelfProtectionResult.NotDeviceOwner
@@ -463,6 +560,9 @@ class LockCoordinator(
 
         // Disable user control (prevents clear-data, force-stop)
         val userControlResult = gateway.setUserControlDisabled(listOf(selfPackageName))
+
+        // Lock OS Date, Time, and TimeZone
+        gateway.enforceTimeTamperProtection()
 
         return if (uninstallResult is DpmOperationResult.Ok && userControlResult is DpmOperationResult.Ok) {
             SelfProtectionResult.Applied
@@ -475,8 +575,7 @@ class LockCoordinator(
     }
 
     /**
-     * Check if the current time is inside the configured lock window.
-     * Per §33 window semantics:
+     * Check if the current time is inside the configured lock window:
      *   hideAt < revealAt: [hideAt, revealAt)
      *   hideAt > revealAt: [hideAt, 1440) OR [0, revealAt)
      */
@@ -484,24 +583,11 @@ class LockCoordinator(
         config: TargetAppConfig,
         nowMillis: Long,
         zone: java.time.ZoneId
-    ): Boolean {
-        val nowZoned = java.time.Instant.ofEpochMilli(nowMillis).atZone(zone)
-        val currentMinute = nowZoned.hour * 60 + nowZoned.minute
-        val hide = config.hideAtMinuteOfDay
-        val reveal = config.revealAtMinuteOfDay
-
-        return if (hide < reveal) {
-            // Window does not cross midnight: [hide, reveal)
-            currentMinute in hide until reveal
-        } else {
-            // Window crosses midnight: [hide, 1440) OR [0, reveal)
-            currentMinute >= hide || currentMinute < reveal
-        }
-    }
+    ): Boolean = SelfLockPolicy.isInsideWindow(config, nowMillis, zone)
 
     /**
-     * Submit a configuration edit per §38 (approx).
-     * Handled within the single mutex to avoid race conditions.
+     * Submit a configuration edit.
+     * Enforces self-lock policy at the authoritative mutation boundary within the single mutex.
      */
     suspend fun tryEditConfig(config: TargetAppConfig): com.limiter.app.policy.SettingsPolicy.EditResult = mutex.withLock {
         val now = timeSource.nowMillis()
@@ -510,25 +596,47 @@ class LockCoordinator(
         val targets = settingsRepository.snapshotTargets()
         val protectedPkgs = criticalPackageResolver.resolveProtected()
 
+        // Enforce self-lock: management controls locked during active restriction window
+        val selfLock = SelfLockPolicy.calculateSelfLockStatus(targets, now, zone, protectedPkgs)
+        val isNewTarget = config.packageName !in targets
+
         // Protected packages cannot be added or edited as targets
         if (config.packageName in protectedPkgs) {
             return@withLock com.limiter.app.policy.SettingsPolicy.EditResult.Protected
         }
         
         // Treat as Add if it doesn't exist
-        if (config.packageName !in targets) {
+        if (isNewTarget) {
+            if (!SelfLockGate.isActionAllowed(SelfLockAction.AddTarget(config.packageName, config), selfLock)) {
+                return@withLock com.limiter.app.policy.SettingsPolicy.EditResult.SelfLocked
+            }
             val addResult = com.limiter.app.policy.SettingsPolicy.evaluateAdd(config, targets, protectedPkgs)
             if (addResult is com.limiter.app.policy.SettingsPolicy.AddResult.Ok) {
                 settingsRepository.putTarget(addResult.config)
                 return@withLock com.limiter.app.policy.SettingsPolicy.EditResult.Applied(addResult.config)
             } else if (addResult is com.limiter.app.policy.SettingsPolicy.AddResult.Protected) {
                 return@withLock com.limiter.app.policy.SettingsPolicy.EditResult.Protected
+            } else if (addResult is com.limiter.app.policy.SettingsPolicy.AddResult.Duplicate) {
+                return@withLock com.limiter.app.policy.SettingsPolicy.EditResult.Duplicate
+            } else if (addResult is com.limiter.app.policy.SettingsPolicy.AddResult.SelfLocked) {
+                return@withLock com.limiter.app.policy.SettingsPolicy.EditResult.SelfLocked
+            } else if (addResult is com.limiter.app.policy.SettingsPolicy.AddResult.Invalid) {
+                return@withLock com.limiter.app.policy.SettingsPolicy.EditResult.Invalid(addResult.reason)
             } else {
                 return@withLock com.limiter.app.policy.SettingsPolicy.EditResult.Invalid("Add failed: $addResult")
             }
         }
-        
+
+        val existing = targets[config.packageName] ?: return@withLock com.limiter.app.policy.SettingsPolicy.EditResult.NotFound
+
+        // Enforce self-lock: blocks loosening (limit increase, window loosening), allows tightening (e.g. limit decrease)
+        val editAction = SelfLockAction.EditTarget(config.packageName, existing, config)
+        if (!SelfLockGate.isActionAllowed(editAction, selfLock)) {
+            return@withLock com.limiter.app.policy.SettingsPolicy.EditResult.SelfLocked
+        }
+
         val editResult = com.limiter.app.policy.SettingsPolicy.evaluateEdit(config, targets, now, zone)
+
         when (editResult) {
             is com.limiter.app.policy.SettingsPolicy.EditResult.Applied -> {
                 settingsRepository.putTarget(editResult.config)
@@ -549,11 +657,19 @@ class LockCoordinator(
 
     /**
      * Submit a configuration removal.
+     * Enforces self-lock policy at the authoritative mutation boundary within the single mutex.
      */
     suspend fun tryRemoveConfig(packageName: String): com.limiter.app.policy.SettingsPolicy.RemoveResult = mutex.withLock {
         val now = timeSource.nowMillis()
         val zone = timeSource.zone()
         val targets = settingsRepository.snapshotTargets()
+        val protectedPkgs = criticalPackageResolver.resolveProtected()
+
+        // Enforce self-lock: removing a target is loosening and strictly blocked during self-lock
+        val selfLock = SelfLockPolicy.calculateSelfLockStatus(targets, now, zone, protectedPkgs)
+        if (!SelfLockGate.isActionAllowed(SelfLockAction.RemoveTarget(packageName), selfLock)) {
+            return@withLock com.limiter.app.policy.SettingsPolicy.RemoveResult.SelfLocked
+        }
         
         val removeResult = com.limiter.app.policy.SettingsPolicy.evaluateRemove(packageName, targets, now, zone)
         if (removeResult is com.limiter.app.policy.SettingsPolicy.RemoveResult.Deferred) {
@@ -561,5 +677,44 @@ class LockCoordinator(
         }
         
         return@withLock removeResult
+    }
+
+    private data class RestorationResult(
+        val visibilityRestored: Boolean,
+        val unsuspensionRestored: Boolean
+    ) {
+        val isFullyRestored: Boolean get() = visibilityRestored && unsuspensionRestored
+    }
+
+    private fun attemptIndependentUnfreeze(
+        pkg: String,
+        initialVisibilityRestored: Boolean,
+        initialUnsuspensionRestored: Boolean
+    ): RestorationResult {
+        var vis = initialVisibilityRestored
+        var unsusp = initialUnsuspensionRestored
+        if (!unsusp) {
+            if (freezer.restoreSuspension(pkg) is DpmOperationResult.Ok) {
+                unsusp = true
+            }
+        }
+        if (!vis) {
+            if (freezer.restoreVisibility(pkg) is DpmOperationResult.Ok) {
+                vis = true
+            }
+        }
+        return RestorationResult(vis, unsusp)
+    }
+
+    companion object {
+        private const val MAX_LOCK_HORIZON_MILLIS = 36L * 60L * 60L * 1000L
+
+        private fun safeLogE(msg: String, tr: Throwable? = null) {
+            try {
+                if (tr != null) android.util.Log.e("Limiter", msg, tr) else android.util.Log.e("Limiter", msg)
+            } catch (_: Throwable) {
+                System.err.println("Limiter: $msg")
+            }
+        }
     }
 }

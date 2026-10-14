@@ -12,6 +12,7 @@ import androidx.lifecycle.lifecycleScope
 import com.limiter.app.LimiterApp
 import com.limiter.app.model.UsageSnapshot
 import com.limiter.app.policy.PollPlanner
+import com.limiter.app.time.TimeMath
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -40,26 +41,45 @@ class UsageMonitorService : LifecycleService() {
         private const val NOTIFICATION_ID = 1
         private const val NO_USAGE_ACCESS_RETRY_MS = 60_000L
 
+        val LOOP_ERROR_BACKOFF_MS = longArrayOf(5_000L, 10_000L, 30_000L, 60_000L)
+
+        fun calculateLoopBackoff(consecutiveFailures: Int): Long {
+            if (consecutiveFailures <= 0) return 0L
+            val index = (consecutiveFailures - 1).coerceIn(0, LOOP_ERROR_BACKOFF_MS.size - 1)
+            return LOOP_ERROR_BACKOFF_MS[index]
+        }
+
         fun start(context: Context) {
-            val intent = Intent(context, UsageMonitorService::class.java)
-            context.startForegroundService(intent)
+            try {
+                val intent = Intent(context, UsageMonitorService::class.java)
+                context.startForegroundService(intent)
+            } catch (e: android.app.ForegroundServiceStartNotAllowedException) {
+                android.util.Log.e("Limiter", "Foreground service start not allowed in UsageMonitorService.start", e)
+            } catch (e: Exception) {
+                android.util.Log.e("Limiter", "Failed to start UsageMonitorService", e)
+            }
         }
 
         fun stop(context: Context) {
-            val intent = Intent(context, UsageMonitorService::class.java)
-            context.stopService(intent)
+            try {
+                val intent = Intent(context, UsageMonitorService::class.java)
+                context.stopService(intent)
+            } catch (e: Exception) {
+                android.util.Log.e("Limiter", "Failed to stop UsageMonitorService", e)
+            }
         }
     }
 
     /**
      * Callback interface for limit-reached events.
-     * Stage 2: no-op implementation. Stage 3 will wire this to LockCoordinator.
      */
     interface LimitReachedCallback {
         suspend fun onLimitReached(packageName: String, usedMillis: Long)
     }
 
     private var monitorJob: Job? = null
+    internal var consecutiveLoopFailures: Int = 0
+        private set
 
     override fun onCreate() {
         super.onCreate()
@@ -100,68 +120,109 @@ class UsageMonitorService : LifecycleService() {
         val reader = app.usageStatsReader
         val snapshotStore = app.usageSnapshotStore
         val settingsRepo = app.settingsRepository
-        val timeSource = app.timeSource
         val callback = app.limitReachedCallback
 
         while (lifecycleScope.coroutineContext[Job]?.isActive == true) {
-            // 1. Verify Device Owner
-            if (!app.isDeviceOwner()) {
-                // Publish DeviceOwnerRequired status — don't fabricate enforcement
-                snapshotStore.clear()
-                delay(NO_USAGE_ACCESS_RETRY_MS)
-                continue
-            }
+            try {
+                // 1. Verify Device Owner
+                if (!app.isDeviceOwner()) {
+                    // Publish DeviceOwnerRequired status — don't fabricate enforcement
+                    snapshotStore.clear()
+                    delay(NO_USAGE_ACCESS_RETRY_MS)
+                    continue
+                }
 
-            // 2. Verify Usage Access
-            if (!reader.hasUsageAccess()) {
-                snapshotStore.clear()
-                delay(NO_USAGE_ACCESS_RETRY_MS)
-                continue
-            }
+                // 2. Verify Usage Access
+                if (!reader.hasUsageAccess()) {
+                    snapshotStore.clear()
+                    delay(NO_USAGE_ACCESS_RETRY_MS)
+                    continue
+                }
 
-            // 3 & 4 & 5. Read usage, publish snapshots, check limits
-            val targets = settingsRepo.snapshotTargets()
-            var minRemaining = Long.MAX_VALUE
+                // 3 & 4 & 5. Read usage, publish snapshots, check limits
+                val targets = settingsRepo.snapshotTargets()
+                var minRemaining = Long.MAX_VALUE
 
-            val allSnapshots = mutableMapOf<String, UsageSnapshot.Available>()
+                val nowMillis = app.timeSource.nowMillis()
+                val zone = app.timeSource.zone()
+                val dayStartMillis = TimeMath.localMidnightMillis(nowMillis, zone)
 
-            for ((pkg, config) in targets) {
-                val usedMillis = reader.readTodayUsageMillis(pkg)
-                val limitMillis = config.dailyLimitMinutes * 60_000L
-                val remainingMillis = (limitMillis - usedMillis).coerceAtLeast(0)
+                val allSnapshots = mutableMapOf<String, UsageSnapshot.Available>()
+                val usageMap = reader.readTodayUsageMillisBatch(targets.keys)
+                val existingSnapshots = snapshotStore.getSnapshots()
+                val storedDayStart = snapshotStore.getStoredDayStartMillis()
+                var needsReschedule = false
 
-                val snapshot = UsageSnapshot.Available(
-                    packageName = pkg,
-                    usedMillis = usedMillis,
-                    remainingMillis = remainingMillis,
-                    limitMinutes = config.dailyLimitMinutes
+                for ((pkg, config) in targets) {
+                    val rawUsedMillis = usageMap[pkg] ?: 0L
+                    // Enforce Monotonic Daily Usage (Anti-Reset) within the same local calendar day
+                    val usedMillis = if (storedDayStart == dayStartMillis && existingSnapshots.containsKey(pkg)) {
+                        maxOf(rawUsedMillis, existingSnapshots[pkg]?.usedMillis ?: 0L)
+                    } else {
+                        rawUsedMillis
+                    }
+
+                    val effectiveDailyLimitMinutes = minOf(config.dailyLimitMinutes, com.limiter.app.policy.SettingsPolicy.MAX_DAILY_LIMIT_MINUTES)
+                    val limitMillis = effectiveDailyLimitMinutes * 60_000L
+                    val remainingMillis = (limitMillis - usedMillis).coerceAtLeast(0)
+
+                    val snapshot = UsageSnapshot.Available(
+                        packageName = pkg,
+                        usedMillis = usedMillis,
+                        remainingMillis = remainingMillis,
+                        limitMinutes = effectiveDailyLimitMinutes
+                    )
+                    allSnapshots[pkg] = snapshot
+
+                    if (remainingMillis < minRemaining) {
+                        minRemaining = remainingMillis
+                    }
+
+                    // 5. Check limit: usedMillis >= limitMillis
+                    if (usedMillis >= limitMillis) {
+                        callback?.onLimitReached(pkg, usedMillis)
+                        needsReschedule = true
+                    }
+                }
+
+                snapshotStore.publishAll(allSnapshots, dayStartMillis)
+
+                // 5.5. Watchdog check: reconcile and reschedule if any lock deadline or retry is due
+                val currentLockRecords = app.lockStateStore.snapshot()
+                val reconciled = UsageMonitorWatchdog.reconcileIfDue(currentLockRecords, nowMillis) {
+                    app.lockCoordinator.reconcile()
+                }
+
+                if (needsReschedule || reconciled) {
+                    app.timeWindowScheduler.rescheduleIfPlanChanged()
+                }
+
+                // Successful poll cycle: reset consecutive failure count
+                consecutiveLoopFailures = 0
+
+                // 6. Wait according to PollPlanner
+                val delayMs = if (minRemaining == Long.MAX_VALUE) {
+                    PollPlanner.nextDelayMillis(Long.MAX_VALUE)
+                } else if (minRemaining <= 0) {
+                    // All targets reached limit or have 0 remaining; wait 30s instead of spinning at 0ms
+                    30_000L
+                } else {
+                    PollPlanner.nextDelayMillis(minRemaining)
+                }
+
+                delay(delayMs)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                consecutiveLoopFailures++
+                val backoffMs = calculateLoopBackoff(consecutiveLoopFailures)
+                android.util.Log.e(
+                    "Limiter",
+                    "Recovered from unexpected exception in monitorLoop (consecutive failures: $consecutiveLoopFailures, backoff: ${backoffMs}ms)",
+                    e
                 )
-                allSnapshots[pkg] = snapshot
-
-                if (remainingMillis < minRemaining) {
-                    minRemaining = remainingMillis
-                }
-
-                // 5. Check limit: usedMillis >= limitMinutes * 60_000L
-                if (usedMillis >= limitMillis) {
-                    callback?.onLimitReached(pkg, usedMillis)
-                    app.timeWindowScheduler?.reschedule()
-                }
+                delay(backoffMs)
             }
-
-            snapshotStore.publishAll(allSnapshots)
-
-            // 6. Wait according to PollPlanner
-            val delayMs = if (minRemaining == Long.MAX_VALUE) {
-                PollPlanner.nextDelayMillis(Long.MAX_VALUE)
-            } else if (minRemaining <= 0) {
-                // All targets reached limit or have 0 remaining; wait 30s instead of spinning at 0ms
-                30_000L
-            } else {
-                PollPlanner.nextDelayMillis(minRemaining)
-            }
-
-            delay(delayMs)
         }
     }
 

@@ -9,8 +9,6 @@ import android.content.Intent
  *
  * This receiver is registered as the Device Owner component:
  *   com.limiter.app/.admin.LimiterAdminReceiver
- *
- * Stage 1: Placeholder — no enforcement logic yet.
  */
 class LimiterAdminReceiver : DeviceAdminReceiver() {
 

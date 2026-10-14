@@ -17,20 +17,32 @@ data class DiscoveredApp(
  * Interface for discovering eligible user-installed launchable applications.
  */
 interface AppDiscoveryRepository {
-    suspend fun getEligibleApps(alreadyConfigured: Set<String>): List<DiscoveredApp>
+    suspend fun getEligibleApps(alreadyConfigured: Set<String>): List<DiscoveredApp> =
+        getEligibleApps(alreadyConfigured, includeSystemApps = false)
+
+    suspend fun getEligibleApps(
+        alreadyConfigured: Set<String>,
+        includeSystemApps: Boolean
+    ): List<DiscoveredApp> = getEligibleApps(alreadyConfigured)
 }
 
 /**
  * Production implementation using PackageManager and CriticalPackageResolver.
  *
- * Uses only legitimate launcher-intent queries per AGENTS.md §51 without QUERY_ALL_PACKAGES.
+ * Uses only legitimate launcher-intent queries without QUERY_ALL_PACKAGES.
  */
 class DeviceAppDiscoveryRepository(
     private val context: Context,
     private val criticalPackageResolver: CriticalPackageResolver
 ) : AppDiscoveryRepository {
 
-    override suspend fun getEligibleApps(alreadyConfigured: Set<String>): List<DiscoveredApp> = withContext(Dispatchers.IO) {
+    override suspend fun getEligibleApps(alreadyConfigured: Set<String>): List<DiscoveredApp> =
+        getEligibleApps(alreadyConfigured, includeSystemApps = false)
+
+    override suspend fun getEligibleApps(
+        alreadyConfigured: Set<String>,
+        includeSystemApps: Boolean
+    ): List<DiscoveredApp> = withContext(Dispatchers.IO) {
         val pm = context.packageManager
         val launcherIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
 
@@ -59,8 +71,8 @@ class DeviceAppDiscoveryRepository(
             // 2. Exclude protected packages (Limiter, Launcher, SystemUI, Settings, Dialer, etc.)
             if (pkg in protectedPkgs) continue
 
-            // 3. Exclude system/ineligible packages
-            if (!criticalPackageResolver.isEligibleTarget(pkg)) continue
+            // 3. Exclude system/ineligible packages based on includeSystemApps
+            if (!criticalPackageResolver.isEligibleTarget(pkg, includeSystemApps)) continue
 
             val label = try {
                 info.loadLabel(pm)?.toString()?.takeIf { it.isNotBlank() } ?: pkg

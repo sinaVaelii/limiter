@@ -5,7 +5,7 @@ import android.os.Build
 import com.limiter.app.dpm.DpmGateway
 
 /**
- * Container for device system and permission status per AGENTS.md §49.
+ * Container for device system and permission status.
  */
 data class SystemStatus(
     val isDeviceOwner: Boolean = false,
@@ -37,19 +37,11 @@ class DeviceSystemStatusChecker(
         val isDeviceOwner = dpmGateway.isDeviceOwner()
         val hasUsage = usageStatsReader.hasUsageAccess()
 
-        val hasNotif = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) ==
-                    android.content.pm.PackageManager.PERMISSION_GRANTED
-        } else {
-            true
-        }
+        val hasNotif = context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) ==
+                android.content.pm.PackageManager.PERMISSION_GRANTED
 
-        val hasAlarm = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            val am = context.getSystemService(android.app.AlarmManager::class.java)
-            am?.canScheduleExactAlarms() ?: false
-        } else {
-            true
-        }
+        val am = context.getSystemService(android.app.AlarmManager::class.java)
+        val hasAlarm = am?.canScheduleExactAlarms() ?: false
 
         val isUninstallBlocked = dpmGateway.isUninstallBlocked(context.packageName).getOrDefault(false)
         val isUserControlDisabled = dpmGateway.getUserControlDisabledPackages().contains(context.packageName)

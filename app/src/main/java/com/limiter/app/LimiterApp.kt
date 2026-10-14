@@ -68,7 +68,7 @@ class LimiterApp : Application() {
         com.limiter.app.data.DeviceSystemStatusChecker(this, dpmGateway, usageStatsReader)
     }
 
-    // ---- Stage 3 additions ----
+    // Core infrastructure and DPM bindings
 
     val dpmGateway: DpmGateway by lazy {
         DeviceDpmGateway(this)
@@ -84,9 +84,8 @@ class LimiterApp : Application() {
 
     /**
      * LockCoordinator — the authoritative lock transition boundary.
-     * Only available when Stage 3 components are wired.
      */
-    val lockCoordinator: LockCoordinator? by lazy {
+    val lockCoordinator: LockCoordinator by lazy {
         LockCoordinator(
             gateway = dpmGateway,
             freezer = appFreezer,
@@ -99,12 +98,11 @@ class LimiterApp : Application() {
 
     /**
      * Limit-reached callback for the monitor service.
-     * Stage 3: wired to LockCoordinator.
      */
     var limitReachedCallback: UsageMonitorService.LimitReachedCallback? = null
         get() = lockCoordinator
 
-    val timeWindowScheduler: TimeWindowScheduler? by lazy {
+    val timeWindowScheduler: TimeWindowScheduler by lazy {
         TimeWindowScheduler(
             context = this,
             settingsRepository = settingsRepository,
@@ -130,9 +128,15 @@ class LimiterApp : Application() {
         // No blocking or heavy initialization on main thread.
         applicationScope.launch(kotlinx.coroutines.Dispatchers.Default) {
             if (isDeviceOwner()) {
-                lockCoordinator?.reconcile()
-                timeWindowScheduler?.reschedule()
-                com.limiter.app.service.UsageMonitorService.start(this@LimiterApp)
+                lockCoordinator.reconcile()
+                timeWindowScheduler.reschedule()
+                try {
+                    com.limiter.app.service.UsageMonitorService.start(this@LimiterApp)
+                } catch (e: android.app.ForegroundServiceStartNotAllowedException) {
+                    android.util.Log.e("Limiter", "Foreground service start not allowed in LimiterApp.onCreate", e)
+                } catch (e: Exception) {
+                    android.util.Log.e("Limiter", "Failed to start UsageMonitorService in LimiterApp.onCreate", e)
+                }
             }
         }
     }

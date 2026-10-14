@@ -326,8 +326,8 @@ class AppPickerAndConfigTest {
         viewModel.submitBatchConfig(setOf("com.dv.adm"), -10, 1380, 420)
         assertTrue(settingsRepository.snapshotTargets().isEmpty())
 
-        // > 1440 minutes is invalid
-        viewModel.submitBatchConfig(setOf("com.dv.adm"), 1441, 1380, 420)
+        // > 720 minutes is invalid
+        viewModel.submitBatchConfig(setOf("com.dv.adm"), 721, 1380, 420)
         assertTrue(settingsRepository.snapshotTargets().isEmpty())
     }
 
@@ -379,8 +379,8 @@ class AppPickerAndConfigTest {
         val initial = TargetAppConfig("com.dv.adm", 60, 1380, 420)
         settingsRepository.putTarget(initial)
 
-        // Loosen limit from 60 to 120 min
-        val updated = initial.copy(dailyLimitMinutes = 120)
+        // Loosen limit from 60 to 90 min (+30 min is maximum allowed increase)
+        val updated = initial.copy(dailyLimitMinutes = 90)
         viewModel.submitConfig(updated)
 
         // Target remains 60 min for today
@@ -389,7 +389,7 @@ class AppPickerAndConfigTest {
         val pending = settingsRepository.snapshotPending()
         assertEquals(1, pending.size)
         assertEquals("com.dv.adm", pending[0].packageName)
-        assertEquals(120, pending[0].desired?.dailyLimitMinutes)
+        assertEquals(90, pending[0].desired?.dailyLimitMinutes)
     }
 
     @Test

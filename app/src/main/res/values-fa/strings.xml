@@ -17,6 +17,7 @@
     <string name="status_not_configured">غیرفعال</string>
     <string name="device_owner_cmd_hint">دستور تنظیم مالک دستگاه:\nadb shell dpm set-device-owner com.limiter.app/.admin.LimiterAdminReceiver</string>
     <string name="grant_permission">اعطا</string>
+    <string name="btn_grant_exact_alarm">اعطای مجوز هشدار دقیق</string>
 
     <!-- صفحه حالت خود‌قفل با شمارش معکوس -->
     <string name="self_lock_title">رابط مدیریت قفل است</string>
@@ -49,11 +50,12 @@
     <string name="configure_selected">تنظیم موارد انتخابی</string>
     <string name="batch_config_title">تنظیم دسته‌ای محدودیت‌ها</string>
     <string name="edit_config_title">ویرایش محدودیت برنامه</string>
-    <string name="daily_limit_label">سقف مصرف روزانه (دقیقه، ۱ تا ۱۴۴۰)</string>
+    <string name="daily_limit_label">سقف مصرف روزانه (دقیقه، ۱ تا ۷۲۰)</string>
     <string name="hide_time_label">زمان شروع قفل (مخفی‌سازی)</string>
     <string name="reveal_time_label">زمان پایان قفل (نمایش مجدد)</string>
     <string name="apply">اعمال</string>
     <string name="cancel">انصراف</string>
+    <string name="confirm">تأیید</string>
     <string name="confirm_remove_title">حذف برنامه</string>
     <string name="confirm_remove_msg">آیا از حذف %1$s اطمینان دارید؟ تغییرات تسهیل یا حذف برنامه از فردا اعمال خواهد شد.</string>
     <string name="locked_readonly_title">برنامه قفل است</string>
@@ -67,6 +69,65 @@
     <string name="pending_applies_epoch_day">اعمال در روز مبدا یا پس از آن: %1$d</string>
     <string name="edit_current_effective">تنظیمات فعال فعلی: سقف %1$d دقیقه، بازه %2$s تا %3$s</string>
     <string name="edit_pending_update">تغییر معوق: سقف %1$d دقیقه، بازه %2$s تا %3$s (اعمال از فردا)</string>
-    <string name="error_daily_limit_range">سقف مصرف روزانه باید بین ۱ تا ۱۴۴۰ دقیقه باشد</string>
+    <string name="error_daily_limit_range">سقف مصرف روزانه باید بین ۱ تا ۷۲۰ دقیقه باشد</string>
+    <string name="error_daily_limit_max">سقف مصرف روزانه نمی‌تواند بیش از ۷۲۰ دقیقه (۱۲ ساعت) باشد</string>
+    <string name="error_limit_increase_max">سقف مصرف روزانه در هر بار حداکثر ۳۰ دقیقه قابل افزایش است</string>
     <string name="error_identical_times">زمان شروع و پایان قفل نمی‌توانند یکسان باشند</string>
+
+    <!-- قوانین پی۴ و خود‌قفل -->
+    <string name="picker_already_limited">قبلاً محدود شده</string>
+    <string name="self_lock_add_confirmation">این کار تا پایان قفل خودکار قابل برگشت نیست</string>
+    <string name="self_lock_add_confirmation_title">افزودن برنامه در زمان قفل خودکار</string>
+    <string name="self_lock_view_dashboard">مشاهده داشبورد</string>
+    <string name="self_lock_controls_locked">رابط مدیریت در طول بازه محدودیت قفل است</string>
+
+    <!-- P5 دکمه جابجایی برنامه‌های سیستمی -->
+    <string name="show_system_apps">نمایش برنامه‌های سیستمی</string>
+    <string name="show_system_apps_confirm_title">نمایش برنامه‌های سیستمی؟</string>
+    <string name="show_system_apps_confirm_msg">برنامه‌های سیستمی می‌توانند بر عملکرد دستگاه تأثیر بگذارند. برنامه‌های حیاتی همچنان محافظت می‌شوند، اما در محدودسازی سایر برنامه‌ها احتیاط کنید.</string>
+
+    <!-- P6 بازطراحی رابط کاربری Material 3 -->
+    <string name="duration_chip_15m">۱۵ دقیقه</string>
+    <string name="duration_chip_30m">۳۰ دقیقه</string>
+    <string name="duration_chip_1h">۱ ساعت</string>
+    <string name="duration_chip_2h">۲ ساعت</string>
+    <string name="duration_chip_4h">۴ ساعت</string>
+    <string name="duration_chip_8h">۸ ساعت</string>
+    <string name="duration_chip_12h">۱۲ ساعت</string>
+    <string name="duration_hours_minutes">%1$s ساعت %2$s دقیقه</string>
+    <string name="duration_hours_only">%1$s ساعت</string>
+    <string name="duration_minutes_only">%1$s دقیقه</string>
+    <string name="hours_stepper_label">ساعت: %1$s</string>
+    <string name="minutes_stepper_label">دقیقه: %1$s</string>
+    <string name="custom_duration_title">سقف سفارشی</string>
+    <string name="edit_limit_helper">سقف فعلی: %1$s — در هر بار حداکثر %2$s قابل افزایش است؛ پس از تأخیر اعمال می‌شود.</string>
+    <string name="window_summary">مخفی‌سازی %1$s ← %2$s</string>
+    <string name="chip_device_owner">مالک دستگاه</string>
+    <string name="chip_usage_access">دسترسی مصرف</string>
+    <string name="chip_notifications">اعلان‌ها</string>
+    <string name="chip_exact_alarm">هشدار دقیق</string>
+    <string name="chip_self_protection">خودمحافظتی</string>
+    <string name="chip_battery_optimization">باتری</string>
+    <string name="chip_ok">فعال</string>
+    <string name="chip_fix">تنظیم</string>
+    <string name="health_fix_title">نیاز به اعطای دسترسی یا تنظیم</string>
+    <string name="battery_guidance_title">تنظیمات پس‌زمینه و بهینه‌سازی باتری</string>
+    <string name="battery_guidance_msg">برای مانیتورینگ بدون توقف در MIUI / HyperOS، اطمینان حاصل کنید که اجرای خودکار (Autostart) فعال و ذخیره باتری روی بدون محدودیت (No Restrictions) تنظیم شده است.</string>
+    <string name="open_settings">باز کردن تنظیمات</string>
+    <string name="target_state_active">فعال</string>
+    <string name="target_state_locked">قفل تا %1$s</string>
+    <string name="target_state_pending">تغییر معوق تا %1$s دیگر</string>
+    <string name="target_next_event_lock">شروع قفل در %1$s</string>
+    <string name="target_next_event_unlock">پایان قفل در %1$s</string>
+    <string name="target_next_event_reset">صفر شدن مصرف روزانه در نیمه‌شب</string>
+    <string name="pending_banner_title">تغییرات معوق</string>
+    <string name="pending_banner_subtitle">اعمال از فردا (روز مبدأ %1$d)</string>
+    <string name="empty_targets_title">هیچ برنامه‌ای تحت مدیریت نیست</string>
+    <string name="empty_targets_msg">برنامه‌هایی که مایلید سقف مصرف روزانه یا بازه قفل شبانه برای آن‌ها اعمال شود را انتخاب کنید.</string>
+    <string name="empty_targets_action">افزودن اولین برنامه</string>
+    <string name="self_lock_configured_limits">سقف‌های تنظیم‌شده برنامه‌ها (فقط خواندنی):</string>
+    <string name="self_lock_add_app_secondary">افزودن برنامه</string>
+    <string name="time_picker_title">انتخاب زمان</string>
+    <string name="time_picker_confirm">تأیید</string>
+    <string name="time_picker_cancel">انصراف</string>
 </resources>

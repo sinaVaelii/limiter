@@ -266,4 +266,73 @@ class UsageCalculatorTest {
     fun `invalid time window with fromMillis greater than toMillis throws exception`() {
         UsageCalculator.foregroundMillis(emptyList(), pkg, fromMillis = 5000, toMillis = 1000)
     }
+
+    @Test
+    fun `events with future timestamp beyond toMillis are ignored`() {
+        val events = listOf(
+            event(timestamp = 2000, type = EventType.ACTIVITY_RESUMED),
+            event(timestamp = 3000, type = EventType.ACTIVITY_PAUSED),
+            // Future events simulated after clock tamper
+            event(timestamp = 100_000, type = EventType.ACTIVITY_RESUMED),
+            event(timestamp = 200_000, type = EventType.ACTIVITY_PAUSED)
+        )
+        // to = 5000, future events at 100_000+ must be completely ignored
+        assertEquals(1000, UsageCalculator.foregroundMillis(events, pkg, from, to))
+    }
+
+    @Test
+    fun `unclosed session spanning huge time window is capped to MAX_UNCLOSED_SESSION_MILLIS`() {
+        val start = 1_000_000L
+        val tenHoursLater = start + 10L * 60 * 60 * 1000
+        val events = listOf(
+            event(timestamp = start, type = EventType.ACTIVITY_RESUMED)
+        )
+        val calculated = UsageCalculator.foregroundMillis(events, pkg, fromMillis = start, toMillis = tenHoursLater)
+        assertEquals(UsageCalculator.MAX_UNCLOSED_SESSION_MILLIS, calculated)
+    }
+
+    @Test
+    fun `paired session spanning huge time window is capped to MAX_SESSION_DURATION_MILLIS`() {
+        val start = 1_000_000L
+        val tenHoursLater = start + 10L * 60 * 60 * 1000
+        val events = listOf(
+            event(timestamp = start, type = EventType.ACTIVITY_RESUMED),
+            event(timestamp = tenHoursLater, type = EventType.ACTIVITY_PAUSED)
+        )
+        val calculated = UsageCalculator.foregroundMillis(events, pkg, fromMillis = start, toMillis = tenHoursLater)
+        assertEquals(UsageCalculator.MAX_SESSION_DURATION_MILLIS, calculated)
+    }
+
+    @Test
+    fun `clash royale events before cutoff are ignored while events after cutoff count normally`() {
+        val clashPkg = UsageCalculator.CLASH_ROYALE_PACKAGE
+        val cutoff = UsageCalculator.CLASH_ROYALE_TEST_CUTOFF_EPOCH_MILLIS
+        val dayStart = cutoff - 5L * 60 * 60 * 1000 // 5 hours before cutoff
+
+        val preCutoffEvents = listOf(
+            UsageEventRecord(clashPkg, "GameApp", cutoff - 4L * 60 * 60 * 1000, EventType.ACTIVITY_RESUMED),
+            UsageEventRecord(clashPkg, "GameApp", cutoff - 2L * 60 * 60 * 1000, EventType.ACTIVITY_PAUSED)
+        )
+        // Pre-cutoff usage alone must yield 0ms
+        val preCutoffUsage = UsageCalculator.foregroundMillis(
+            preCutoffEvents,
+            clashPkg,
+            fromMillis = dayStart,
+            toMillis = cutoff + 1000
+        )
+        assertEquals(0L, preCutoffUsage)
+
+        // Events after cutoff must count normally
+        val postCutoffEvents = preCutoffEvents + listOf(
+            UsageEventRecord(clashPkg, "GameApp", cutoff + 10_000, EventType.ACTIVITY_RESUMED),
+            UsageEventRecord(clashPkg, "GameApp", cutoff + 70_000, EventType.ACTIVITY_PAUSED)
+        )
+        val postCutoffUsage = UsageCalculator.foregroundMillis(
+            postCutoffEvents,
+            clashPkg,
+            fromMillis = dayStart,
+            toMillis = cutoff + 100_000
+        )
+        assertEquals(60_000L, postCutoffUsage)
+    }
 }

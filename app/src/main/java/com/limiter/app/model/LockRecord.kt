@@ -1,7 +1,7 @@
 package com.limiter.app.model
 
 /**
- * Persisted lock record per AGENTS.md §26.
+ * Persisted lock record.
  *
  * Contains enough information to handle retry without an alarm loop.
  *
