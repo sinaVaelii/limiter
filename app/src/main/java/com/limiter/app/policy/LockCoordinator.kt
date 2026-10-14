@@ -91,14 +91,6 @@ class LockCoordinator(
         }
     }
 
-    /**
-     * Called on each monitor tick to trigger reconciliation of expired locks
-     * and scheduled windows.
-     */
-    suspend fun onTick() {
-        reconcile()
-    }
-
     // -----------------------------------------------------------------------
     // Internal reconciliation implementation
     // -----------------------------------------------------------------------
@@ -159,24 +151,20 @@ class LockCoordinator(
                     val isSuspended = freezer.isSuspended(pkg) == true
 
                     if (isHidden || isSuspended) {
-                        // Package is still physically restricted; attempt independent unfreeze
-                        var visRestored = !isHidden
-                        var unsuspRestored = !isSuspended
+                        val restoration = attemptIndependentUnfreeze(
+                            pkg = pkg,
+                            initialVisibilityRestored = !isHidden,
+                            initialUnsuspensionRestored = !isSuspended
+                        )
 
-                        if (!unsuspRestored) {
-                            if (freezer.restoreSuspension(pkg) is DpmOperationResult.Ok) {
-                                unsuspRestored = true
-                            }
-                        }
-                        if (!visRestored) {
-                            if (freezer.restoreVisibility(pkg) is DpmOperationResult.Ok) {
-                                visRestored = true
-                            }
-                        }
-
-                        if (!visRestored || !unsuspRestored) {
+                        if (!restoration.isFullyRestored) {
                             // Unfreeze failed; retain recovery record with backoff
-                            lockStateStore.recordUnlockFailure(pkg, now, visRestored, unsuspRestored)
+                            lockStateStore.recordUnlockFailure(
+                                pkg = pkg,
+                                now = now,
+                                visibilityRestored = restoration.visibilityRestored,
+                                unsuspensionRestored = restoration.unsuspensionRestored
+                            )
                             val updated = lockStateStore.snapshot()[pkg]
                             if (updated != null) {
                                 lockRecords[pkg] = updated
@@ -234,19 +222,14 @@ class LockCoordinator(
                 var visRestored = record.visibilityRestored || ((state as? LockState.ReleasePending)?.visibilityRestored ?: false)
                 var unsusRestored = record.unsuspensionRestored || ((state as? LockState.ReleasePending)?.unsuspensionRestored ?: false)
                 if (record.unlockFailureCount >= 3) {
-                    if (!unsusRestored) {
-                        val unsuspendResult = freezer.restoreSuspension(pkg)
-                        if (unsuspendResult is DpmOperationResult.Ok) {
-                            unsusRestored = true
-                        }
-                    }
-                    if (!visRestored) {
-                        val unhideResult = freezer.restoreVisibility(pkg)
-                        if (unhideResult is DpmOperationResult.Ok) {
-                            visRestored = true
-                        }
-                    }
-                    if (visRestored && unsusRestored) {
+                    val restoration = attemptIndependentUnfreeze(
+                        pkg = pkg,
+                        initialVisibilityRestored = visRestored,
+                        initialUnsuspensionRestored = unsusRestored
+                    )
+                    visRestored = restoration.visibilityRestored
+                    unsusRestored = restoration.unsuspensionRestored
+                    if (restoration.isFullyRestored) {
                         lockStateStore.recordUnlock(pkg)
                         lockStateStore.clearUnlockRetry(pkg)
                         lockRecords[pkg] = LockRecord(LockState.Unlocked)
@@ -271,22 +254,15 @@ class LockCoordinator(
             var visibilityRestored = record.visibilityRestored || ((state as? LockState.ReleasePending)?.visibilityRestored ?: false)
             var unsuspensionRestored = record.unsuspensionRestored || ((state as? LockState.ReleasePending)?.unsuspensionRestored ?: false)
 
-            // Requirement 3: Attempt unsuspend and unhide independently, retry ONLY incomplete operations
-            if (!unsuspensionRestored) {
-                val unsuspendResult = freezer.restoreSuspension(pkg)
-                if (unsuspendResult is DpmOperationResult.Ok) {
-                    unsuspensionRestored = true
-                }
-            }
+            val restoration = attemptIndependentUnfreeze(
+                pkg = pkg,
+                initialVisibilityRestored = visibilityRestored,
+                initialUnsuspensionRestored = unsuspensionRestored
+            )
+            visibilityRestored = restoration.visibilityRestored
+            unsuspensionRestored = restoration.unsuspensionRestored
 
-            if (!visibilityRestored) {
-                val unhideResult = freezer.restoreVisibility(pkg)
-                if (unhideResult is DpmOperationResult.Ok) {
-                    visibilityRestored = true
-                }
-            }
-
-            if (visibilityRestored && unsuspensionRestored) {
+            if (restoration.isFullyRestored) {
                 // Both restored successfully!
                 lockStateStore.recordUnlock(pkg)
                 lockStateStore.clearUnlockRetry(pkg)
@@ -442,22 +418,13 @@ class LockCoordinator(
                             isInsideWindow(config, now, zone)
 
                     if (!shouldBeLocked) {
-                        // Attempt independent unfreeze
-                        var visRestored = !hidden
-                        var unsuspRestored = !suspended
+                        val restoration = attemptIndependentUnfreeze(
+                            pkg = pkg,
+                            initialVisibilityRestored = !hidden,
+                            initialUnsuspensionRestored = !suspended
+                        )
 
-                        if (!unsuspRestored) {
-                            if (freezer.restoreSuspension(pkg) is DpmOperationResult.Ok) {
-                                unsuspRestored = true
-                            }
-                        }
-                        if (!visRestored) {
-                            if (freezer.restoreVisibility(pkg) is DpmOperationResult.Ok) {
-                                visRestored = true
-                            }
-                        }
-
-                        if (visRestored && unsuspRestored) {
+                        if (restoration.isFullyRestored) {
                             lockStateStore.recordUnlock(pkg)
                             lockStateStore.clearUnlockRetry(pkg)
                             lockRecords[pkg] = LockRecord(LockState.Unlocked)
@@ -467,8 +434,8 @@ class LockCoordinator(
                             lockStateStore.recordUnlockFailure(
                                 pkg = pkg,
                                 now = now,
-                                visibilityRestored = visRestored,
-                                unsuspensionRestored = unsuspRestored
+                                visibilityRestored = restoration.visibilityRestored,
+                                unsuspensionRestored = restoration.unsuspensionRestored
                             )
                             val updated = lockStateStore.snapshot()[pkg]
                             if (updated != null) {
@@ -683,6 +650,33 @@ class LockCoordinator(
         }
         
         return@withLock removeResult
+    }
+
+    private data class RestorationResult(
+        val visibilityRestored: Boolean,
+        val unsuspensionRestored: Boolean
+    ) {
+        val isFullyRestored: Boolean get() = visibilityRestored && unsuspensionRestored
+    }
+
+    private fun attemptIndependentUnfreeze(
+        pkg: String,
+        initialVisibilityRestored: Boolean,
+        initialUnsuspensionRestored: Boolean
+    ): RestorationResult {
+        var vis = initialVisibilityRestored
+        var unsusp = initialUnsuspensionRestored
+        if (!unsusp) {
+            if (freezer.restoreSuspension(pkg) is DpmOperationResult.Ok) {
+                unsusp = true
+            }
+        }
+        if (!vis) {
+            if (freezer.restoreVisibility(pkg) is DpmOperationResult.Ok) {
+                vis = true
+            }
+        }
+        return RestorationResult(vis, unsusp)
     }
 
     companion object {

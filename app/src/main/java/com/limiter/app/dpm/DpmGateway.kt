@@ -46,10 +46,4 @@ interface DpmGateway {
      * Check if a package is confirmed installed on the device.
      */
     fun isPackageInstalled(pkg: String): Boolean
-
-    /**
-     * Returns a list of all packages on the device that are physically frozen
-     * (hidden == true && suspended == true).
-     */
-    fun getAllFrozenPackages(): List<String>
 }

@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
     Device Admin metadata for LimiterAdminReceiver.
-    Stage 1: empty uses-policies — no destructive device-admin policy declarations yet.
-    Actual policies will be added in Stage 3 when DpmGateway is implemented.
+    Limiter operates as Device Owner using direct DevicePolicyManager APIs;
+    no legacy uses-policies flags are required.
 -->
 <device-admin>
     <uses-policies />

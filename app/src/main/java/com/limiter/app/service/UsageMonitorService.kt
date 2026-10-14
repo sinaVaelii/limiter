@@ -178,11 +178,11 @@ class UsageMonitorService : LifecycleService() {
                 val currentLockRecords = app.lockStateStore.snapshot()
                 val nowMillis = app.timeSource.nowMillis()
                 val reconciled = UsageMonitorWatchdog.reconcileIfDue(currentLockRecords, nowMillis) {
-                    app.lockCoordinator?.reconcile()
+                    app.lockCoordinator.reconcile()
                 }
 
                 if (needsReschedule || reconciled) {
-                    app.timeWindowScheduler?.rescheduleIfPlanChanged()
+                    app.timeWindowScheduler.rescheduleIfPlanChanged()
                 }
 
                 // Successful poll cycle: reset consecutive failure count

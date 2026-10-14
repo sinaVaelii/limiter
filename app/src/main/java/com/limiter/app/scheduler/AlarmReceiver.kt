@@ -25,7 +25,7 @@ class AlarmReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
         val app = context.applicationContext as? LimiterApp ?: return
-        val coordinator = app.lockCoordinator ?: return
+        val coordinator = app.lockCoordinator
 
         processAlarm(
             context = context,

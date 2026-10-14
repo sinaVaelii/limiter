@@ -84,9 +84,8 @@ class LimiterApp : Application() {
 
     /**
      * LockCoordinator — the authoritative lock transition boundary.
-     * Only available when Stage 3 components are wired.
      */
-    val lockCoordinator: LockCoordinator? by lazy {
+    val lockCoordinator: LockCoordinator by lazy {
         LockCoordinator(
             gateway = dpmGateway,
             freezer = appFreezer,
@@ -99,12 +98,11 @@ class LimiterApp : Application() {
 
     /**
      * Limit-reached callback for the monitor service.
-     * Stage 3: wired to LockCoordinator.
      */
     var limitReachedCallback: UsageMonitorService.LimitReachedCallback? = null
         get() = lockCoordinator
 
-    val timeWindowScheduler: TimeWindowScheduler? by lazy {
+    val timeWindowScheduler: TimeWindowScheduler by lazy {
         TimeWindowScheduler(
             context = this,
             settingsRepository = settingsRepository,
@@ -130,8 +128,8 @@ class LimiterApp : Application() {
         // No blocking or heavy initialization on main thread.
         applicationScope.launch(kotlinx.coroutines.Dispatchers.Default) {
             if (isDeviceOwner()) {
-                lockCoordinator?.reconcile()
-                timeWindowScheduler?.reschedule()
+                lockCoordinator.reconcile()
+                timeWindowScheduler.reschedule()
                 try {
                     com.limiter.app.service.UsageMonitorService.start(this@LimiterApp)
                 } catch (e: android.app.ForegroundServiceStartNotAllowedException) {

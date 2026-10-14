@@ -116,10 +116,4 @@ class FakeDpmGateway : DpmGateway {
     override fun isPackageInstalled(pkg: String): Boolean {
         return getPackageInstallStatus(pkg) is PackageInstallStatus.Installed
     }
-
-    override fun getAllFrozenPackages(): List<String> {
-        return installedPackages.filter { pkg ->
-            hiddenPackages.contains(pkg) || suspendedPackages.contains(pkg)
-        }
-    }
 }

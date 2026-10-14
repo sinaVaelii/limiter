@@ -59,7 +59,8 @@ class MainActivity : ComponentActivity() {
                     return try {
                         val keys = intent.extras?.keySet() ?: emptySet()
                         ParsedIntent(action = intent.action, extraKeys = keys)
-                    } catch (_: Exception) {
+                    } catch (e: Exception) {
+                        android.util.Log.w("Limiter", "Failed to inspect intent extras: action=${intent.action}", e)
                         ParsedIntent(action = intent.action, hasMalformedExtras = true)
                     }
                 }
@@ -132,7 +133,7 @@ class MainActivity : ComponentActivity() {
         viewModel.refreshSystemStatus()
         val app = application as LimiterApp
         app.applicationScope.launch {
-            app.lockCoordinator?.reconcile()
+            app.lockCoordinator.reconcile()
         }
     }
 

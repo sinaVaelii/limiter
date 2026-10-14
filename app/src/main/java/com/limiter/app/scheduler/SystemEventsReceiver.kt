@@ -27,7 +27,7 @@ class SystemEventsReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
         val app = context.applicationContext as? LimiterApp ?: return
-        val coordinator = app.lockCoordinator ?: return
+        val coordinator = app.lockCoordinator
 
         when (intent.action) {
             Intent.ACTION_BOOT_COMPLETED,

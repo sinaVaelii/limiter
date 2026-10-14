@@ -35,9 +35,22 @@ The lock is real — apps get `hidden + suspended` via Android Device Owner API.
 | 🔒 قفل واقعی | `hidden + suspended` از طریق DPM — بدون overlay |
 | 📵 کاملاً آفلاین | هیچ دسترسی به اینترنتی نداره (`INTERNET` permission نداره) |
 | 🌙 قفل شبانه | پنجره زمانی مشخص با صفحه تمام‌صفحه + تایمر شمارش معکوس |
-| ⏱ محدودیت روزانه | ۱ تا ۱۴۴۰ دقیقه در روز، قابل تنظیم |
+| ⏱ محدودیت روزانه | ۱ تا ۷۲۰ دقیقه در روز (حداکثر ۱۲ ساعت)، افزایش محدودیت حداکثر ۳۰+ دقیقه |
+| 🔐 قفل خودکار (Self-Lock) | جلوگیری از شل کردن محدودیت‌ها یا حذف اپ‌ها؛ افزودن اپ هدف جدید مجاز است |
 | 🛡 محافظت از خودش | نمیشه حذف یا force stop کرد — مگر از طریق ADB |
 | 🔄 ریکاوری خودکار | بعد از ریبوت state رو بازیابی می‌کنه و قفل‌های ناتمام رو ترمیم می‌کنه |
+
+---
+
+## قوانین محدودیت و خود-قفلی / Limits & Self-Lock Rules
+
+- **سقف مصرف روزانه:** بین ۱ تا ۷۲۰ دقیقه (حداکثر ۱۲ ساعت).
+- **قانون افزایش سقف (+30m):** در هر ویرایش، افزایش محدودیت حداکثر ۳۰+ دقیقه نسبت به سقف فعال فعلی مجاز است و برای جلوگیری از فرار آنی، با تأخیر اعمال می‌شود (کاهش سقف بلافاصله اعمال می‌شود).
+- **قفل خودکار (Self-Lock):** در طول بازه قفل خودکار، هرگونه شل کردن قوانین (افزایش سقف، حذف اپ، یا گشاد کردن پنجره زمانی) مسدود است. مشاهده وضعیت و افزودن اپ‌های هدف **جدید** مجاز است.
+
+- **Daily limit bounds:** 1 to 720 minutes (12 hours maximum).
+- **Limit increase cap (+30m):** Maximum +30 minutes increase per edit over the current active limit, queued with delay to prevent impulsive loosening (reductions apply immediately).
+- **Self-lock enforcement:** Loosening limits, removing apps, or widening time windows is blocked during self-lock. Viewing dashboard and adding **new** target apps remains allowed.
 
 ---
 
@@ -72,27 +85,28 @@ adb shell appops set com.limiter.app SCHEDULE_EXACT_ALARM allow
 
 ---
 
-## اگه اوضاع خراب شد / Emergency Recovery
+## بازیابی اضطراری / Emergency Recovery
 
-حذف Device Owner:
+در صورت نیاز به حذف برنامه یا بازیابی اضطراری، دستور زیر Device Owner را حذف می‌کند (فقط در بیلد debug با فلگ `testOnly` فعال است):
+
 ```bash
 adb shell dpm remove-active-admin com.limiter.app/.admin.LimiterAdminReceiver
 ```
 
-اگه یه اپ قفل مونده بود:
+اگه یه اپ قفل مونده بود، می‌توان به صورت دستی آن را آزاد کرد:
 ```bash
 adb shell pm set-application-hidden com.example.target false
 adb shell pm unsuspend com.example.target
 ```
 
-> ✅ ADB، factory reset و safe boot همیشه فعال‌ان — این اپ اون‌ها رو غیرفعال نمی‌کنه.
+> ✅ دسترسی‌های ADB، factory reset و safe boot همواره فعال هستند و این برنامه هیچ‌کدام از آن‌ها را غیرفعال نمی‌کند.
 
 ---
 
 ## بیلد / Build
 
 ```bash
-# تست‌ها — ۱۹۹ تست، ۰ خطا / Tests — 199 tests, 0 failures
+# تست‌ها — ۲۸۸ تست، ۰ خطا / Tests — 288 tests, 0 failures
 ./gradlew testDebugUnitTest --offline
 
 # بیلد debug

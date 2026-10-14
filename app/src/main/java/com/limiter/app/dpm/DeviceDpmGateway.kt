@@ -286,30 +286,4 @@ class DeviceDpmGateway(
     override fun isPackageInstalled(pkg: String): Boolean {
         return getPackageInstallStatus(pkg) is PackageInstallStatus.Installed
     }
-
-    override fun getAllFrozenPackages(): List<String> {
-        if (!isDeviceOwner()) return emptyList()
-        val pm = context.packageManager
-        val packages = try {
-            pm.getInstalledPackages(
-                PackageManager.PackageInfoFlags.of(PackageManager.MATCH_UNINSTALLED_PACKAGES.toLong())
-            )
-        } catch (_: Exception) {
-            emptyList()
-        }
-        val frozen = mutableListOf<String>()
-        for (pkgInfo in packages) {
-            val pkg = pkgInfo.packageName ?: continue
-            try {
-                val hidden = dpm.isApplicationHidden(adminComponent, pkg)
-                val suspended = dpm.isPackageSuspended(adminComponent, pkg)
-                if (hidden || suspended) {
-                    frozen.add(pkg)
-                }
-            } catch (_: Exception) {
-                // Ignore errors for individual packages
-            }
-        }
-        return frozen
-    }
 }
