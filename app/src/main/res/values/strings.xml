@@ -130,4 +130,8 @@
     <string name="time_picker_title">انتخاب زمان</string>
     <string name="time_picker_confirm">تأیید</string>
     <string name="time_picker_cancel">انصراف</string>
+    <string name="cd_app_icon">آیکون برنامه</string>
+    <string name="cd_increase">افزایش</string>
+    <string name="cd_decrease">کاهش</string>
+    <string name="cd_clear_search">پاک کردن جستجو</string>
 </resources>

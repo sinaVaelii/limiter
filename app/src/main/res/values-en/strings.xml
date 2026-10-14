@@ -129,4 +129,8 @@
     <string name="time_picker_title">Select Time</string>
     <string name="time_picker_confirm">OK</string>
     <string name="time_picker_cancel">Cancel</string>
+    <string name="cd_app_icon">App icon</string>
+    <string name="cd_increase">Increase</string>
+    <string name="cd_decrease">Decrease</string>
+    <string name="cd_clear_search">Clear search</string>
 </resources>
