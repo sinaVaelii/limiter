@@ -116,4 +116,12 @@ class FakeDpmGateway : DpmGateway {
     override fun isPackageInstalled(pkg: String): Boolean {
         return getPackageInstallStatus(pkg) is PackageInstallStatus.Installed
     }
+
+    var timeTamperProtectionEnforced: Boolean = false
+
+    override fun enforceTimeTamperProtection(): Boolean {
+        if (!deviceOwner) return false
+        timeTamperProtectionEnforced = true
+        return true
+    }
 }

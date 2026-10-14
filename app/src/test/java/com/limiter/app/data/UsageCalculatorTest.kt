@@ -266,4 +266,17 @@ class UsageCalculatorTest {
     fun `invalid time window with fromMillis greater than toMillis throws exception`() {
         UsageCalculator.foregroundMillis(emptyList(), pkg, fromMillis = 5000, toMillis = 1000)
     }
+
+    @Test
+    fun `events with future timestamp beyond toMillis are ignored`() {
+        val events = listOf(
+            event(timestamp = 2000, type = EventType.ACTIVITY_RESUMED),
+            event(timestamp = 3000, type = EventType.ACTIVITY_PAUSED),
+            // Future events simulated after clock tamper
+            event(timestamp = 100_000, type = EventType.ACTIVITY_RESUMED),
+            event(timestamp = 200_000, type = EventType.ACTIVITY_PAUSED)
+        )
+        // to = 5000, future events at 100_000+ must be completely ignored
+        assertEquals(1000, UsageCalculator.foregroundMillis(events, pkg, from, to))
+    }
 }

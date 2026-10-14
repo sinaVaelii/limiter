@@ -46,4 +46,9 @@ interface DpmGateway {
      * Check if a package is confirmed installed on the device.
      */
     fun isPackageInstalled(pkg: String): Boolean
+
+    /**
+     * Enforce OS date, time, and timezone tamper protection via Device Owner.
+     */
+    fun enforceTimeTamperProtection(): Boolean = true
 }

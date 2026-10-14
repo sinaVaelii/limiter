@@ -1,21 +1,24 @@
 # Limiter State Tracker
 
-- **Current Phase:** P7 completed | **Commit:** `3be29e2`
+- **Current Phase:** H7-Final completed | **Commit:** Pending local commit
 - **Decisions:**
   - D1: Baseline `compileSdk=targetSdk=minSdk=34`; test device runs Android 15 (API 35).
   - D2: `UsageMonitorService` invokes `LockCoordinator.reconcile()` when lock/retry is due.
   - D3: `SCHEDULE_EXACT_ALARM` appops permission authorized for granting in P2.
-  - D4: Clock tampering (H7) options documented in triage; no code changes.
+  - D4: Clock tampering (H7) enforced via Device Owner (`setAutoTimeEnabled`, `setAutoTimeZoneEnabled`, `DISALLOW_CONFIG_DATE_TIME`).
   - D5: Max daily limit 720m, max raise +30m, self-lock allows viewing & adding targets.
-- **Phases Completed:** P0 (Triage), P1 (Entry Points), P2 (Time Windows/Alarms), P3 (Lock/Unlock/Fallbacks), P4 (Product Rules), P5 (Performance & Fault Tolerance: M4, M5, M6, M7), P6 (Material 3 UI/UX & Localization), P7 (Cleanup, Build Config, Docs & Tests).
-- **Open Issues:** None. All catalog items (H1–H7, M1–M9, B1–B6, L1–L3, D1, T1) resolved or triaged.
-- **Test Status:** 288 unit tests, 0 failures, 100% passing (`./gradlew testDebugUnitTest --offline`).
+  - D6: Horizon Clamp (36 hours) clamps multi-day stranded lock records in `LockCoordinator.reconcile()`.
+  - D7: Ignore future-timestamped usage events in `UsageCalculator` and `UsageStatsReader`.
+- **Phases Completed:** P0–P7, H7-Final (OS Clock-Tamper Lock, Horizon Clamp, and One-Time ADB Recovery).
+- **Open Issues:** None.
+- **Test Status:** 291 unit tests, 0 failures, 100% passing (`./gradlew testDebugUnitTest --offline`).
 - **Build Status:** Debug APK compiled successfully (`./gradlew assembleDebug --offline`).
 - **Phone Status (Xiaomi Redmi 12 - `4a952d897d79`):**
   - Device Owner: Active (`com.limiter.app/.admin.LimiterAdminReceiver`).
-  - FGS: Active (`UsageMonitorService`, `systemExempted` type `0x400`).
+  - User Restriction: `no_config_date_time` active (verified via `dumpsys user`).
+  - FGS: Active (`UsageMonitorService`, `systemExempted`).
   - Exact Alarm: Granted (`SCHEDULE_EXACT_ALARM: allow`).
-  - Active Locks: `com.dv.adm` locked until `1792244640000` (2026-10-17 17:14:00 +0330).
+  - Active Targets: Legitimate locks clamped to today (e.g. `com.supercell.clashroyale`, `net.iGap`), other apps unlocked/restored.
 - **Invariants Reminder:**
   - R4: Never mutate persisted pipe/tilde codecs or DataStore keys.
   - R10: No INTERNET, no broad DPM restrictions (`DISALLOW_DEBUGGING_FEATURES`), retain testOnly.

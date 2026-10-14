@@ -97,6 +97,7 @@ class UsageStatsReader(
 
         while (usageEvents.hasNextEvent()) {
             usageEvents.getNextEvent(event)
+            if (event.timeStamp > endMillis) continue
             val eventType = mapEventType(event.eventType) ?: continue
             records.add(
                 UsageEventRecord(

@@ -37,9 +37,9 @@ object UsageCalculator {
             "fromMillis ($fromMillis) must be <= toMillis ($toMillis)"
         }
 
-        // Filter to relevant package only, sorted by timestamp
+        // Filter to relevant package only, sorted by timestamp; ignore future-timestamped events
         val relevant = events
-            .filter { it.packageName == packageName || it.eventType == EventType.DEVICE_SHUTDOWN }
+            .filter { (it.packageName == packageName || it.eventType == EventType.DEVICE_SHUTDOWN) && it.timestampMillis <= toMillis }
             .sortedBy { it.timestampMillis }
 
         // Track active activities by their className (or "unknown" if null)

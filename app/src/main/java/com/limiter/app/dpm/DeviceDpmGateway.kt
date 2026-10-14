@@ -286,4 +286,17 @@ class DeviceDpmGateway(
     override fun isPackageInstalled(pkg: String): Boolean {
         return getPackageInstallStatus(pkg) is PackageInstallStatus.Installed
     }
+
+    override fun enforceTimeTamperProtection(): Boolean {
+        if (!isDeviceOwner()) return false
+        return try {
+            dpm.setAutoTimeEnabled(adminComponent, true)
+            dpm.setAutoTimeZoneEnabled(adminComponent, true)
+            dpm.addUserRestriction(adminComponent, android.os.UserManager.DISALLOW_CONFIG_DATE_TIME)
+            true
+        } catch (e: Exception) {
+            android.util.Log.w("Limiter", "enforceTimeTamperProtection failed: ${e.message}", e)
+            false
+        }
+    }
 }

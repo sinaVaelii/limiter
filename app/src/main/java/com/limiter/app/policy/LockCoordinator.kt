@@ -119,6 +119,25 @@ class LockCoordinator(
         val lockRecords = lockStateStore.snapshot().toMutableMap()
         val protectedPkgs = criticalPackageResolver.resolveProtected()
 
+        // Horizon Clamp: inspect each stored lock record to prevent multi-day lock deadlines
+        for ((pkg, record) in lockRecords.toMap()) {
+            val lockedUntil = record.state as? LockState.LockedUntil ?: continue
+            if (lockedUntil.untilEpochMillis > now + MAX_LOCK_HORIZON_MILLIS) {
+                val config = targets[pkg]
+                val clampedUntil = if (config != null && isInsideWindow(config, now, zone)) {
+                    TimeMath.nextOccurrence(now, zone, config.revealAtMinuteOfDay)
+                } else {
+                    now
+                }
+                val clampedRecord = record.copy(state = LockState.LockedUntil(clampedUntil))
+                lockRecords[pkg] = clampedRecord
+                if (clampedUntil > now) {
+                    lockStateStore.recordUnlock(pkg)
+                    lockStateStore.lockUntilAtLeast(pkg, clampedUntil)
+                }
+            }
+        }
+
         // Phase B — Build Recovery Set (Requirement 1)
         // Only recover packages using reliable Limiter-managed history:
         // configured targets + pending changes + persisted lock records.
@@ -495,8 +514,15 @@ class LockCoordinator(
         val existing = lockRecords[packageName]
         if (existing != null) {
             val lockedUntil = existing.state as? LockState.LockedUntil
-            if (lockedUntil != null && now < lockedUntil.untilEpochMillis) {
-                return // Already locked
+            if (lockedUntil != null && lockedUntil.untilEpochMillis > now) {
+                val windowUntil = if (isInsideWindow(config, now, zone)) {
+                    TimeMath.nextOccurrence(now, zone, config.revealAtMinuteOfDay)
+                } else {
+                    0L
+                }
+                if (lockedUntil.untilEpochMillis >= windowUntil) {
+                    return // Already locked with valid future deadline and meets window requirement
+                }
             }
             val isUndergoingRelease = existing.state is LockState.ReleasePending ||
                     existing.nextUnlockRetryAtMillis != null ||
@@ -535,6 +561,9 @@ class LockCoordinator(
 
         // Disable user control (prevents clear-data, force-stop)
         val userControlResult = gateway.setUserControlDisabled(listOf(selfPackageName))
+
+        // Lock OS Date, Time, and TimeZone
+        gateway.enforceTimeTamperProtection()
 
         return if (uninstallResult is DpmOperationResult.Ok && userControlResult is DpmOperationResult.Ok) {
             SelfProtectionResult.Applied
@@ -680,6 +709,8 @@ class LockCoordinator(
     }
 
     companion object {
+        private const val MAX_LOCK_HORIZON_MILLIS = 36L * 60L * 60L * 1000L
+
         private fun safeLogE(msg: String, tr: Throwable? = null) {
             try {
                 if (tr != null) android.util.Log.e("Limiter", msg, tr) else android.util.Log.e("Limiter", msg)
